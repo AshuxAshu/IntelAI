@@ -1,6 +1,7 @@
 # configs/runtime/dinner_demo.yaml - consumed by `physicalai run --config`.
-# B0 authors the skeleton; Commit B13 wires the final classes, task text, and
-# single-scene sharing between the robot and the cameras.
+# The skeleton is authored at bootstrap; the runtime integration wires the
+# final classes, task text, and single-scene sharing between the robot and
+# the cameras.
 runtime:
   robot:
     class_path: dinner_table.runtime.MuJoCoBimanualRobot

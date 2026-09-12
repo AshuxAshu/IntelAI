@@ -1,0 +1,18 @@
+# configs/physicalai/smolvla_ablation.yaml - G2 ablation candidate (S4 Phase 4).
+# Native SmolVLA on the pick&place slice; language-conditioned, consumes the
+# dataset task strings natively. Refined when the pick&place slice is generated.
+model:
+  class_path: physicalai.policies.SmolVLA
+  init_args:
+    pretrained_name_or_path: lerobot/smolvla_base
+data:
+  class_path: physicalai.data.lerobot.LeRobotDataModule
+  init_args:
+    repo_id: dinner/pickplace
+    root: datasets/dinner/pickplace     # generated via demo_gen --focus pick&place
+    data_format: physicalai
+    train_batch_size: 8
+trainer:
+  accelerator: gpu
+  devices: 1
+  max_steps: 80000

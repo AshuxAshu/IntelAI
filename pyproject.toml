@@ -23,7 +23,10 @@ dependencies = [
   "openvino; sys_platform != 'darwin'",
   "openvino-genai; sys_platform != 'darwin'",
   "nncf>=3.0; sys_platform != 'darwin'",
-  # lerobot==0.6.0 arrives pinned transitively via physicalai-train
+  # lerobot with its dataset extra (HF datasets, pandas, pyarrow, torchcodec):
+  # the plain transitive pin cannot load LeRobot datasets, and the 0.6 line drops
+  # symbols the physicalai 0.1.x policies import, so cap below it.
+  "lerobot[dataset]>=0.5.1,<0.6",
 ]
 
 [project.optional-dependencies]

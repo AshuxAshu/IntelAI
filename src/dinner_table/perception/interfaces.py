@@ -57,3 +57,19 @@ class Detector(Protocol):
     def ground(self, snapshot: PerceptionSnapshot, target: str) -> ObjectPose3D | None:
         """3D-pose grounding of `target` from the snapshot's detections + depth.
         Returns None when the target is not confidently visible."""
+
+
+@runtime_checkable
+class Tracker(Protocol):
+    """Temporal pose filtering + gripper-state fusion (implemented by Dev A's
+    ObjectTracker in perception/tracker.py, A13; scripted in executor tests)."""
+
+    def update(self, poses: dict[str, ObjectPose3D]) -> dict[str, ObjectPose3D]:
+        """Ingest freshly grounded poses; return the temporally filtered set
+        (median filtering + confidence gating per the A13 spec)."""
+
+    def fuse_held(
+        self, poses: dict[str, ObjectPose3D], gripper_apertures: dict[str, float]
+    ) -> dict[str, ObjectPose3D]:
+        """Return poses with held_by fused from gripper apertures (object within
+        6 cm of an arm's end-effector and that gripper aperture < 0.6)."""
