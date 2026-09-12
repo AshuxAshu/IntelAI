@@ -1,0 +1,11 @@
+# configs/runtime/device_map.yaml - model -> OpenVINO device per host profile
+# (S4 Phase 6). The runtime resolves the profile by CPU model at startup;
+# unknown hosts fall back to i7_13620h.
+i7_13620h:
+  act: "GPU"
+  yolo: "GPU"
+  vlm: "GPU"
+ultra_2:
+  act: "GPU"
+  yolo: "GPU"
+  vlm: "NPUW:CPU,NPU"     # single-model heterogeneity: transformer on NPU, unsupported ops on CPU

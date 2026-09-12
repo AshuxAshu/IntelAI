@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+artifacts/
+datasets/
+.ov_cache/
+wandb/
+experiments/
+experiments_lightning/
+*.egg-info/
+uv.lock.mergebackup
+.DS_Store
+# local reference clones of the Intel physicalai repositories (exploration only, not project code)
+physical-ai-studio/
+physicalai/
+Problem Statement.md
+IMPLEMENTATION_PLAN.md

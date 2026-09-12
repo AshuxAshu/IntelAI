@@ -1,0 +1,27 @@
+# configs/runtime/dinner_demo.yaml - consumed by `physicalai run --config`.
+# B0 authors the skeleton; Commit B13 wires the final classes, task text, and
+# single-scene sharing between the robot and the cameras.
+runtime:
+  robot:
+    class_path: dinner_table.runtime.MuJoCoBimanualRobot
+    init_args:
+      scene:
+        class_path: dinner_table.scene.builder.Scene
+        init_args: {seed: 42}
+  action_source:
+    class_path: dinner_table.runtime.SkillExecutorSource
+    init_args:
+      act:
+        class_path: physicalai.inference.InferenceModel
+        init_args: {export_dir: ./artifacts/act, device: GPU}   # GPU | CPU | NPU | NPUW:CPU,NPU
+      execution:
+        class_path: physicalai.runtime.AsyncExecution
+      task: "open the top drawer, pick up the plate with arm A, place it on the table, pick up the mug with arm B, pour water into the mug with arm A"
+  cameras:
+    wrist_A:  {class_path: dinner_table.runtime.MuJoCoCamera, init_args: {camera_name: wrist_A}}
+    wrist_B:  {class_path: dinner_table.runtime.MuJoCoCamera, init_args: {camera_name: wrist_B}}
+    overhead: {class_path: dinner_table.runtime.MuJoCoCamera, init_args: {camera_name: overhead}}
+  fps: 25.0
+  callbacks:
+    - class_path: dinner_table.runtime.HudTelemetryCallback
+run: {duration_s: 180.0}

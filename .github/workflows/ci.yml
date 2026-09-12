@@ -1,0 +1,27 @@
+name: ci
+on:
+  push: { branches: [main, dev-a, dev-b] }
+  pull_request:
+  schedule: [ { cron: "0 3 * * *" } ]
+  workflow_dispatch:
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    env: { MUJOCO_GL: egl, OMP_NUM_THREADS: "1" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libegl1 libgl1
+      - run: uv sync --frozen --extra cpu --extra dev
+      - run: uv run pytest tests -m "fast or slow" -x
+  nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env: { MUJOCO_GL: egl, OMP_NUM_THREADS: "1" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libegl1 libgl1
+      - run: uv sync --frozen --extra cpu --extra dev
+      - run: uv run pytest tests -m "fast or slow or nightly" --timeout 3600

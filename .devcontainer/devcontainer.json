@@ -1,0 +1,7 @@
+{
+  "name": "dinner-table",
+  "build": { "dockerfile": "../Dockerfile" },
+  "containerEnv": { "MUJOCO_GL": "egl", "OMP_NUM_THREADS": "1" },
+  "postCreateCommand": "uv sync --extra cpu --extra dev",
+  "customizations": { "vscode": { "extensions": ["charliermarsh.ruff", "ms-python.python"] } }
+}

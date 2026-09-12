@@ -1,0 +1,33 @@
+# configs/eval/robustness_matrix.yaml - extreme-DR scenario profiles (S3.4
+# eval-extreme column) applied on top of a seed by eval/robustness.py.
+# Keys mirror configs/scene/dr_*.yaml so profiles compose with the DR engine.
+profiles:
+  light_mass:
+    mass_scale: [0.3, 1.0]
+  heavy_mass:
+    mass_scale: [1.0, 3.0]
+  low_friction:
+    friction_scale: [0.2, 0.6]
+  high_friction:
+    friction_scale: [1.0, 1.5]
+  extreme_spawn:
+    spawn_xy_jitter_m: 0.10
+    spawn_yaw_jitter_rad: 0.44
+  gripper_noise:
+    gripper_noise_sigma_rad: 0.052          # sigma ~3 degrees
+  dark_scene:
+    light_intensity: [0.2, 0.5]
+  bright_scene:
+    light_intensity: [1.5, 2.0]
+  backlight:
+    light_pos_extremes: true
+  unseen_textures:
+    holdout_textures: true
+  camera_jitter:
+    camera_jitter_deg: 4.0
+  drawer_jam:
+    drawer_friction_scale: [2.5, 3.0]
+  drawer_loose:
+    drawer_friction_scale: [0.25, 0.4]
+instruction_paraphrases: configs/vlm/instruction_corpus.yaml   # paraphrase sweep source
+perturbations: [object_nudge, object_shift, instruction_swap]  # mid-episode injections

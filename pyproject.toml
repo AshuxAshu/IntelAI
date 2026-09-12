@@ -1,0 +1,67 @@
+[project]
+name = "dinner_table"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "mujoco==3.2.*",
+  "numpy>=1.26",
+  "pydantic==2.*",
+  "pillow>=10",
+  "loguru>=0.7",
+  "ultralytics==8.3.*",
+  "transformers>=5.3.0,<5.4.0",   # aligned with the physicalai PyPI release pin (>=5.3,<5.4)
+  "peft==0.*",
+  "wandb==0.*",
+  "huggingface_hub>=0.34",
+  "av>=12",
+  # Intel stack - no macOS wheels; markers keep `uv sync` green on the Mac.
+  # Versions are deliberately unpinned here: the physicalai PyPI releases pin
+  # openvino/transformers exactly, so they drive resolution; uv.lock freezes
+  # the exact versions for reproducibility.
+  "physicalai-train==0.1.*; sys_platform != 'darwin'",
+  "physicalai==0.1.*; sys_platform != 'darwin'",
+  "openvino; sys_platform != 'darwin'",
+  "openvino-genai; sys_platform != 'darwin'",
+  "nncf>=3.0; sys_platform != 'darwin'",
+  # lerobot==0.6.0 arrives pinned transitively via physicalai-train
+]
+
+[project.optional-dependencies]
+cpu = ["torch>=2.5", "torchvision>=0.20"]
+xpu = ["torch>=2.5", "torchvision>=0.20"]
+dev = ["pytest>=8", "pytest-timeout>=2", "ruff>=0.6", "pre-commit>=3"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dinner_table"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+# Linux pulls torch from the CPU wheel index (CUDA bundles are ~2.5 GB and useless
+# on the i7/iGPU); macOS falls back to PyPI, whose mac wheels are CPU-only anyway.
+# The cloud CUDA training env and the XPU env use their own wheel indexes per the plan.
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[tool.pytest.ini_options]
+markers = [
+  "fast: quick unit tests (every push)",
+  "slow: integration tests (every push, < 15 min)",
+  "nightly: training smokes, parity gates, recovery suite",
+  "openvino: requires the OpenVINO runtime",
+  "gpu: requires an OpenVINO GPU device",
+  "npu: requires an OpenVINO NPU device",
+]
+addopts = "-ra"
+timeout = 600
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
