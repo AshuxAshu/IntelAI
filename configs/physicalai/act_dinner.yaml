@@ -1,0 +1,16 @@
+# configs/physicalai/act_dinner.yaml - consumed directly by `physicalai fit`.
+# jsonargparse (LightningCLI-style) format; native ACT requires data_format: physicalai.
+model:
+  class_path: physicalai.policies.ACT
+  init_args: {chunk_size: 25, n_action_steps: 25, image_size: [224, 224], use_vae: true}
+data:
+  class_path: physicalai.data.lerobot.LeRobotDataModule
+  init_args:
+    repo_id: dinner/train
+    root: datasets/dinner/train          # LOCAL dataset - no Hub round-trip
+    data_format: physicalai
+    train_batch_size: 16
+trainer:
+  accelerator: gpu                        # the XPU config flips this to xpu + strategy: xpu_single
+  devices: 1
+  max_steps: 120000

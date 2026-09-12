@@ -1,4 +1,4 @@
-"""Executor logic tests: zones, reassignment, grouping, predicates, claims (B1)."""
+"""Executor logic tests: zones, reassignment, grouping, predicates, claims."""
 
 from __future__ import annotations
 

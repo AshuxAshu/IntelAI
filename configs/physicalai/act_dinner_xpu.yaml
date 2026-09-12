@@ -1,0 +1,19 @@
+# configs/physicalai/act_dinner_xpu.yaml - Intel XPU training variant.
+# Same model/dataset as act_dinner.yaml; trainer flipped to Studio's registered
+# XPU accelerator (single device). Requires torch from the pytorch-xpu wheel index.
+model:
+  class_path: physicalai.policies.ACT
+  init_args: {chunk_size: 25, n_action_steps: 25, image_size: [224, 224], use_vae: true}
+data:
+  class_path: physicalai.data.lerobot.LeRobotDataModule
+  init_args:
+    repo_id: dinner/train
+    root: datasets/dinner/train
+    data_format: physicalai
+    train_batch_size: 16
+trainer:
+  accelerator: xpu
+  strategy: xpu_single
+  devices: 1
+  precision: "32"
+  max_steps: 120000

@@ -2,7 +2,7 @@
 
 Perception enters as plain data (an ObjectPose3D map plus drawer state and
 multiview verdicts), so every predicate is deterministic and unit-testable
-without sim, models, or network. Zone claimability from the B1 rule table is
+without sim, models, or network. Zone claimability from the rule table is
 enforced by the executor through workspace.ZoneClaims at execution time and
 tested separately.
 """
@@ -53,7 +53,7 @@ def _pose(world: WorldState, name: str | None) -> ObjectPose3D | None:
 
 
 def check_precondition(step: Step, world: WorldState) -> PreconditionReport:
-    """Precondition gate for one step (B1 rule table)."""
+    """Precondition gate for one step (executor rule table)."""
     pose = _pose(world, step.object)
     if step.skill == "pick":
         if pose is None:
@@ -96,7 +96,7 @@ def check_precondition(step: Step, world: WorldState) -> PreconditionReport:
 def check_postcondition(
     step: Step, world: WorldState, goal: np.ndarray | None = None
 ) -> PreconditionReport:
-    """Postcondition gate for one step (B1 rule table).
+    """Postcondition gate for one step (executor rule table).
 
     `goal` is the step's resolved world-frame goal; required only for place.
     """
@@ -136,7 +136,7 @@ def check_postcondition(
         return PreconditionReport(ok=True, reason="hold ends with its parallel group")
     if step.skill == "pour":
         # Water level is not camera-observable: verification is delegated to the
-        # VLM boundary check on the following step (B1 rule table, honest spec).
+        # VLM boundary check on the following step (honest spec).
         return PreconditionReport(ok=True, reason="delegated to VLM boundary check")
     if step.skill in ("home", "retract"):
         if world.joints is None or step.arm not in world.joints:

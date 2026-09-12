@@ -4,7 +4,7 @@ group_steps turns a validated TaskGraph into ordered execution groups and
 applies holder-chain-aware transformations to singleton steps (parallel-group
 members are never reassigned - they are coordinated by design):
 
-1. ARM REASSIGNMENT (B1 spec): a singleton pick whose object lies exclusively
+1. ARM REASSIGNMENT: a singleton pick whose object lies exclusively
    in the other arm's zone swaps to that arm; the swap then propagates through
    the hold chain - handoff sources and places follow the object's holder.
    Chain-following is equivalent to the spec's object-position rule for
@@ -58,7 +58,7 @@ def _place_goal(step: Step, poses: dict[str, ObjectPose3D]) -> np.ndarray | None
 def group_steps(
     graph: TaskGraph, poses: dict[str, ObjectPose3D]
 ) -> tuple[list[list[Step]], list[str]]:
-    """Ordered execution groups plus HUD log lines (B1 spec).
+    """Ordered execution groups plus HUD log lines.
 
     Parallel groups become single units placed at their first member's
     position; every other step is a singleton. Singleton picks may be

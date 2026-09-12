@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 artifacts/
 datasets/
+runs/
 .ov_cache/
 wandb/
 experiments/
@@ -13,8 +14,9 @@ experiments_lightning/
 uv.lock.mergebackup
 .DS_Store
 # local reference clones of the Intel physicalai repositories (exploration only, not project code)
-physical-ai-studio/
-physicalai/
+# root-anchored so the pattern cannot swallow configs/physicalai/
+/physical-ai-studio/
+/physicalai/
 Problem Statement.md
 docs/
 IMPLEMENTATION_PLAN.md
