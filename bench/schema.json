@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bench/1.2",
+  "title": "Intel benchmark results record",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "bench/1.2" },
+    "host": {
+      "type": "object",
+      "properties": {
+        "cpu": { "type": ["string", "null"] },
+        "devices": { "type": "array", "items": { "type": "string" } },
+        "power_profile": { "type": ["string", "null"] },
+        "openvino": { "type": ["string", "null"] }
+      },
+      "required": ["cpu", "devices", "power_profile", "openvino"]
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "model": { "enum": ["act", "yolo", "vlm"] },
+          "backend": { "type": "string" },
+          "device": { "type": "string" },
+          "precision": { "enum": ["FP32", "FP16", "INT8"] },
+          "latency_ms": { "$ref": "#/$defs/latency_ms" },
+          "throughput_ips": { "type": "number" },
+          "cold_compile_s": { "type": "number" },
+          "weights": { "type": "string" },
+          "activations": { "type": "string" },
+          "rss_delta_mb": { "type": "number" },
+          "parity": { "$ref": "#/$defs/parity" },
+          "prefill_tok_s": { "type": "number" },
+          "decode_tok_s": { "type": "number" },
+          "e2e_128tok_s": { "type": "number" },
+          "num_iters": { "type": "integer" },
+          "reps": { "type": "integer" },
+          "tokens_generated": { "type": "integer" },
+          "error": { "type": "string" }
+        },
+        "required": ["model", "device"],
+        "anyOf": [
+          { "required": ["precision", "latency_ms"] },
+          { "required": ["precision", "prefill_tok_s", "decode_tok_s", "e2e_128tok_s"] },
+          { "required": ["error"] }
+        ]
+      }
+    },
+    "system": { "$ref": "#/$defs/system" }
+  },
+  "required": ["schema", "host", "runs"],
+  "$defs": {
+    "latency_ms": {
+      "type": "object",
+      "properties": {
+        "p50": { "type": "number" },
+        "p90": { "type": "number" },
+        "p95": { "type": "number" },
+        "p99": { "type": "number" }
+      },
+      "required": ["p50", "p90", "p95", "p99"]
+    },
+    "parity": {
+      "type": "object",
+      "properties": {
+        "closed_loop_success_delta_pp": { "type": "number" },
+        "verdict": { "type": "string" }
+      },
+      "required": ["closed_loop_success_delta_pp", "verdict"]
+    },
+    "system": {
+      "type": "object",
+      "properties": {
+        "control_fps_target": { "type": "number" },
+        "control_fps_achieved": { "type": "number" },
+        "stage_ms_avg": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "power_w_avg": { "type": "number" },
+        "igpu_util_avg": { "type": "number" },
+        "npu_util_avg": { "type": "number" },
+        "success_rate": { "type": "number" },
+        "seeds": { "type": "integer" },
+        "retries_per_skill_avg": { "type": "number" }
+      },
+      "required": [
+        "control_fps_target",
+        "control_fps_achieved",
+        "stage_ms_avg",
+        "power_w_avg",
+        "igpu_util_avg",
+        "npu_util_avg",
+        "success_rate",
+        "seeds",
+        "retries_per_skill_avg"
+      ]
+    }
+  }
+}

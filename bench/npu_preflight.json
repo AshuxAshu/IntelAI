@@ -1,0 +1,147 @@
+{
+  "npu_available": false,
+  "npuw_registered": false,
+  "devices": [
+    "CPU",
+    "GPU.0",
+    "GPU.1"
+  ],
+  "timestamp_utc": "2026-09-13T07:04:11.043900+00:00",
+  "models": [
+    {
+      "name": "act/fp16",
+      "path": "artifacts/act_public/fp16/act.xml",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    },
+    {
+      "name": "act/fp32_reference",
+      "path": "artifacts/act_public/fp32_reference/fp32referenceact.xml",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    },
+    {
+      "name": "act/int8_ptq",
+      "path": "artifacts/act_public/int8_ptq/fp32referenceact.xml",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    },
+    {
+      "name": "act/int8_weights",
+      "path": "artifacts/act_public/int8_weights/fp32referenceact.xml",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    },
+    {
+      "name": "yolo",
+      "path": "artifacts/standin/yolo11n.onnx",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    },
+    {
+      "name": "vlm/openvino_language_model.xml",
+      "path": "/home/vetruvian/.cache/huggingface/hub/models--madnesslab--Qwen2-VL-2B-Instruct-OpenVINO-INT8-SYM/snapshots/68e06dbd7899a3c4a56e2bfa91b2da140ac73bfb/openvino_language_model.xml",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    },
+    {
+      "name": "vlm/openvino_text_embeddings_model.xml",
+      "path": "/home/vetruvian/.cache/huggingface/hub/models--madnesslab--Qwen2-VL-2B-Instruct-OpenVINO-INT8-SYM/snapshots/68e06dbd7899a3c4a56e2bfa91b2da140ac73bfb/openvino_text_embeddings_model.xml",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    },
+    {
+      "name": "vlm/openvino_vision_embeddings_model.xml",
+      "path": "/home/vetruvian/.cache/huggingface/hub/models--madnesslab--Qwen2-VL-2B-Instruct-OpenVINO-INT8-SYM/snapshots/68e06dbd7899a3c4a56e2bfa91b2da140ac73bfb/openvino_vision_embeddings_model.xml",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    },
+    {
+      "name": "vlm/openvino_vision_embeddings_merger_model.xml",
+      "path": "/home/vetruvian/.cache/huggingface/hub/models--madnesslab--Qwen2-VL-2B-Instruct-OpenVINO-INT8-SYM/snapshots/68e06dbd7899a3c4a56e2bfa91b2da140ac73bfb/openvino_vision_embeddings_merger_model.xml",
+      "results": {
+        "NPU": {
+          "compiles": false,
+          "error": "Cannot load library \"/home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so\": /home/vetruvian/Desktop/IntelAI/.venv/lib/python3.12/site-packages/openvino/../openvino/libs/libopenvino_intel_npu_compiler.so: cannot open shared obj"
+        },
+        "NPUW:CPU,NPU": {
+          "compiles": false,
+          "error": "Device with \"NPUW\" name is not registered in the OpenVINO Runtime"
+        }
+      },
+      "unsupported_ops_on_npu": null
+    }
+  ]
+}
