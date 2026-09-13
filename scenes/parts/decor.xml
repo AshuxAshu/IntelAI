@@ -1,9 +1,9 @@
 <mujocoinclude>
   <!-- Room floor -->
-  <geom name="floor" type="plane" size="2.5 2.5 0.1" pos="0 0 0" class="furniture"/>
+  <geom name="floor" type="plane" size="2.5 2.5 0.1" pos="0 0 0" class="furniture" material="floor_mat"/>
 
   <!-- Back wall -->
-  <geom name="wall" type="plane" size="2.5 1.5 0.1" pos="0 1.2 0.75" quat="0.7071068 0.7071068 0 0" class="furniture"/>
+  <geom name="wall" type="plane" size="2.5 1.5 0.1" pos="0 1.2 0.75" quat="0.7071068 0.7071068 0 0" class="furniture" material="wall_mat"/>
 
   <!-- Potted plant on table corner (-0.35, 0.30, table) -->
   <body name="plant" pos="-0.35 0.30 0.36">

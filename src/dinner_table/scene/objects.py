@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 DRAWER_TRAY_Z = 0.31
 UTENSIL_XY_JITTER_M = 0.03
+UTENSIL_YAW_JITTER_RAD = 0.15
 
 
 class SceneObjectError(DinnerTableError):
@@ -70,7 +71,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         spawn_anchor=(-0.10, 0.05, TABLE_TOP_HEIGHT + 0.04),
         spawn_yaw_rad=0.0,
         mass_kg=0.30,
-        friction=(0.9, 0.005, 0.0001),
+        friction=(0.9, 0.005, 0.02),
         visual_mesh=None,
         grasp_class="handle",
     ),
@@ -79,43 +80,43 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         spawn_anchor=(0.0, -0.12, TABLE_TOP_HEIGHT + 0.10),
         spawn_yaw_rad=0.0,
         mass_kg=0.60,
-        friction=(0.9, 0.005, 0.0001),
+        friction=(0.9, 0.005, 0.02),
         visual_mesh=None,
         grasp_class="neck",
     ),
     "spoon_1": ObjectSpec(
         physics=("capsule", (0.008, 0.08, 0.0)),
-        spawn_anchor=(0.08, 0.55, DRAWER_TRAY_Z),
+        spawn_anchor=(0.07, 0.57, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.04,
-        friction=(0.5, 0.005, 0.0001),
+        friction=(0.9, 0.005, 0.02),
         visual_mesh=None,
         grasp_class="mid_handle",
     ),
     "spoon_2": ObjectSpec(
         physics=("capsule", (0.008, 0.08, 0.0)),
-        spawn_anchor=(0.12, 0.55, DRAWER_TRAY_Z),
+        spawn_anchor=(0.13, 0.57, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.04,
-        friction=(0.5, 0.005, 0.0001),
+        friction=(0.9, 0.005, 0.02),
         visual_mesh=None,
         grasp_class="mid_handle",
     ),
     "fork_1": ObjectSpec(
         physics=("capsule", (0.007, 0.085, 0.0)),
-        spawn_anchor=(-0.08, 0.55, DRAWER_TRAY_Z),
+        spawn_anchor=(-0.07, 0.57, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.05,
-        friction=(0.5, 0.005, 0.0001),
+        friction=(0.9, 0.005, 0.02),
         visual_mesh=None,
         grasp_class="mid_handle",
     ),
     "fork_2": ObjectSpec(
         physics=("capsule", (0.007, 0.085, 0.0)),
-        spawn_anchor=(-0.12, 0.55, DRAWER_TRAY_Z),
+        spawn_anchor=(-0.13, 0.57, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.05,
-        friction=(0.5, 0.005, 0.0001),
+        friction=(0.9, 0.005, 0.02),
         visual_mesh=None,
         grasp_class="mid_handle",
     ),
@@ -151,11 +152,13 @@ def sample_spawns(
             else:
                 if name.startswith(("spoon", "fork")):
                     jitter_limit = UTENSIL_XY_JITTER_M
+                    yaw_limit = UTENSIL_YAW_JITTER_RAD
                 else:
                     jitter_limit = dr.spawn_xy_jitter_m
+                    yaw_limit = dr.spawn_yaw_jitter_rad
                 jitter_x = rng.uniform(-jitter_limit, jitter_limit)
                 jitter_y = rng.uniform(-jitter_limit, jitter_limit)
-                yaw_jitter = rng.uniform(-dr.spawn_yaw_jitter_rad, dr.spawn_yaw_jitter_rad)
+                yaw_jitter = rng.uniform(-yaw_limit, yaw_limit)
                 pos = np.array(
                     [
                         spec.spawn_anchor[0] + jitter_x,
@@ -206,6 +209,7 @@ def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarr
             size=geom_size,
             mass=obj_spec.mass_kg,
             friction=obj_spec.friction,
+            condim=6,
             quat=np.array([0.7071068, 0.7071068, 0.0, 0.0], dtype=np.float64),
         )
     else:

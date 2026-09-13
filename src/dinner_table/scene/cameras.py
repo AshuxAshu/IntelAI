@@ -86,6 +86,13 @@ class CameraRig:
             raise CameraRigError(f"unknown camera name: {camera}")
         return self._cached_intrinsics[camera]
 
+    def close(self) -> None:
+        """Free all offscreen GL contexts held by this rig."""
+        for renderer in self._renderers.values():
+            renderer.close()
+        self._renderers.clear()
+        self._depth_renderer.close()
+
     def render(self, camera: str, data: mujoco.MjData) -> np.ndarray:
         """Render uint8 RGB image from specified camera name."""
         if camera not in self._renderers:

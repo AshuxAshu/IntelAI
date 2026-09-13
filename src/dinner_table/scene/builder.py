@@ -173,37 +173,37 @@ class Scene:
         link_configs = [
             (
                 "shoulder_pan",
-                [0.0, 0.0, 0.058],
+                [0.0, 0.0, 0.030],
                 [0.0, 0.0, 1.0],
-                [0.025, 0.025, 0.0],
-                [0.0, 0.0, 0.02],
+                [0.020, 0.020, 0.0],
+                [0.0, 0.0, 0.030],
                 0.15,
-                (0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.025),
             ),
             (
                 "shoulder_lift",
-                [0.0, 0.0, 0.052],
+                [0.0, 0.0, 0.055],
                 [0.0, 1.0, 0.0],
-                [0.022, 0.050, 0.0],
-                [0.0, 0.0, 0.05],
+                [0.022, 0.120, 0.0],
+                [0.0, 0.0, 0.120],
                 0.18,
-                (0.0, 0.0, 0.03),
+                (0.0, 0.0, 0.09),
             ),
             (
                 "elbow_flex",
-                [0.0, 0.0, 0.115],
+                [0.0, 0.0, 0.250],
                 [0.0, 1.0, 0.0],
-                [0.020, 0.045, 0.0],
-                [0.0, 0.0, 0.045],
+                [0.020, 0.090, 0.0],
+                [0.0, 0.0, 0.090],
                 0.14,
-                (0.0, 0.0, 0.06),
+                (0.0, 0.0, 0.07),
             ),
             (
                 "wrist_flex",
-                [0.0, 0.0, 0.095],
+                [0.0, 0.0, 0.185],
                 [0.0, 1.0, 0.0],
                 [0.018, 0.030, 0.0],
-                [0.0, 0.0, 0.03],
+                [0.0, 0.0, 0.030],
                 0.10,
                 (0.0, 0.0, 0.03),
             ),
@@ -220,15 +220,17 @@ class Scene:
                 "gripper",
                 [0.0, 0.0, 0.045],
                 [0.0, 1.0, 0.0],
-                [0.009, 0.011, 0.005],
-                [0.0, 0.012, 0.007],
+                None,
+                None,
                 0.030,
-                (0.0, 0.012, 0.010),
+                None,
             ),
         ]
 
-        for suffix, rel_pos, axis, geom_size, geom_pos, mass, mesh_pos in link_configs:
-            body = parent_body.add_body(name=f"{prefix}_{suffix}_link", pos=rel_pos)
+        for config in link_configs:
+            suffix, rel_pos, axis, geom_size, geom_pos, mass, mesh_pos = config[:7]
+            body_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+            body = parent_body.add_body(name=f"{prefix}_{suffix}_link", pos=rel_pos, quat=body_quat)
             range_deg = self._calibration[suffix]["range_deg"]
             range_rad = np.deg2rad(range_deg)
 
@@ -236,19 +238,25 @@ class Scene:
             kv = kp * 0.05
             frc = FRC_LIMITS[suffix]
 
+            joint_axis = np.array(axis, dtype=np.float64)
+            if suffix == "gripper" and prefix == "B":
+                joint_axis = -joint_axis
+
             body.add_joint(
                 name=f"{prefix}.{suffix}",
                 type=mujoco.mjtJoint.mjJNT_HINGE,
-                axis=axis,
+                axis=joint_axis,
                 range=range_rad,
                 damping=kv,
             )
             if suffix == "gripper":
-                body.add_geom(
-                    type=mujoco.mjtGeom.mjGEOM_BOX,
-                    size=np.array(geom_size, dtype=np.float64),
-                    pos=np.array(geom_pos, dtype=np.float64),
-                    mass=mass,
+                self._attach_jaws(parent_body, body, prefix)
+                body.add_site(name=f"{prefix}.ee", pos=[0.0, 0.0, 0.055], size=[0.005, 0.0, 0.0])
+                body.add_camera(
+                    name=f"wrist_{prefix}",
+                    pos=[0.0, -0.05, 0.05],
+                    quat=[0.0, 1.0, 0.0, 0.0],
+                    fovy=60.0,
                 )
             else:
                 body.add_geom(
@@ -257,7 +265,7 @@ class Scene:
                     pos=np.array(geom_pos, dtype=np.float64),
                     mass=mass,
                 )
-            self._add_visual_mesh(body, LINK_MESHES[suffix][0], pos=mesh_pos)
+                self._add_visual_mesh(body, LINK_MESHES[suffix][0], pos=mesh_pos)
 
             act = spec.add_actuator()
             act.name = f"{prefix}.{suffix}"
@@ -280,23 +288,29 @@ class Scene:
             act.forcelimited = True
             act.forcerange = np.array([-frc, frc], dtype=np.float64)
 
-            if suffix == "gripper":
-                self._attach_jaws(parent_body, body, prefix)
-                body.add_site(name=f"{prefix}.ee", pos=[0.0, 0.0, 0.040], size=[0.005, 0.0, 0.0])
-                body.add_camera(
-                    name=f"wrist_{prefix}",
-                    pos=[0.0, 0.04, 0.06],
-                    quat=[0.92388, 0.38268, 0.0, 0.0],
-                    fovy=60.0,
-                )
-
             parent_body = body
 
     def _attach_jaws(
-        self, wrist_body: mujoco.MjsBody, gripper_body: mujoco.MjsBody, prefix: str
+        self,
+        wrist_body: mujoco.MjsBody,
+        gripper_body: mujoco.MjsBody,
+        prefix: str,
     ) -> None:
         """Attach fixed and moving gripper jaws so the gripper hinge opens and closes them."""
-        fixed_jaw = wrist_body.add_body(name=f"{prefix}_jaw_fixed", pos=[-0.007, 0.0, 0.062])
+        mirror = 1.0
+        if prefix == "B":
+            mirror = -1.0
+        gripper_body.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=np.array([0.009, 0.011, 0.005], dtype=np.float64),
+            pos=np.array([0.0, 0.012 * mirror, 0.007], dtype=np.float64),
+            mass=0.030,
+        )
+        self._add_visual_mesh(gripper_body, "so101_motor_holder", pos=(0.0, 0.012 * mirror, 0.010))
+
+        fixed_jaw = wrist_body.add_body(
+            name=f"{prefix}_jaw_fixed", pos=[-0.008 * mirror, 0.0, 0.062]
+        )
         fixed_jaw.add_geom(
             type=mujoco.mjtGeom.mjGEOM_BOX,
             size=np.array([0.004, 0.010, 0.017], dtype=np.float64),
@@ -305,16 +319,17 @@ class Scene:
         )
         self._add_visual_mesh(fixed_jaw, "so101_fixed_jaw", pos=(0.0, 0.0, 0.017))
 
-        moving_jaw = gripper_body.add_body(name=f"{prefix}_jaw_moving", pos=[0.0055, 0.0, 0.020])
-        jaw_quat = np.array([0.976296, 0.0, 0.216440, 0.0], dtype=np.float64)
+        moving_jaw = gripper_body.add_body(
+            name=f"{prefix}_jaw_moving", pos=[0.0045 * mirror, 0.0, 0.020]
+        )
         moving_jaw.add_geom(
             type=mujoco.mjtGeom.mjGEOM_BOX,
             size=np.array([0.004, 0.010, 0.017], dtype=np.float64),
-            pos=np.array([0.0072, 0.0, 0.0154], dtype=np.float64),
-            quat=jaw_quat,
+            pos=np.array([0.0075 * mirror, 0.0, 0.016], dtype=np.float64),
+            quat=np.array([0.9914449, 0.0, 0.1305262 * mirror, 0.0], dtype=np.float64),
             mass=0.005,
         )
-        self._add_visual_mesh(moving_jaw, "so101_moving_jaw", pos=(0.0, 0.0, 0.017))
+        self._add_visual_mesh(moving_jaw, "so101_moving_jaw", pos=(0.0075 * mirror, 0.0, 0.016))
 
     def _attach_cameras(self, spec: mujoco.MjSpec) -> None:
         """Attach overhead and demo cameras to the worldbody."""
@@ -478,3 +493,7 @@ class Scene:
             return False
         qpos_idx = self.model.jnt_qposadr[drawer_jnt]
         return bool(float(self.data.qpos[qpos_idx]) > (DRAWER_TRAVEL * 0.5))
+
+    def close(self) -> None:
+        """Free the camera rig's offscreen GL contexts."""
+        self.camera_rig.close()

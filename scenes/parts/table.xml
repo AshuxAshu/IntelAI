@@ -1,7 +1,7 @@
 <mujocoinclude>
   <!-- Tabletop, legs, and arm mounting platforms -->
   <body name="table" pos="0 0 0">
-    <geom name="table_top_col" type="box" size="0.45 0.25 0.18" pos="0 0 0.18" class="furniture"/>
+    <geom name="table_top_col" type="box" size="0.45 0.25 0.18" pos="0 0 0.18" class="furniture" material="table_mat"/>
     <geom name="table_leg_1" type="box" size="0.02 0.02 0.17" pos="0.41 0.21 0.17" class="furniture"/>
     <geom name="table_leg_2" type="box" size="0.02 0.02 0.17" pos="-0.41 0.21 0.17" class="furniture"/>
     <geom name="table_leg_3" type="box" size="0.02 0.02 0.17" pos="0.41 -0.21 0.17" class="furniture"/>
