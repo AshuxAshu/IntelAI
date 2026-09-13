@@ -9,6 +9,10 @@ dependencies = [
   "pillow>=10",
   "loguru>=0.7",
   "ultralytics==8.3.*",
+  # ultralytics' onnx export (used by the stand-in detector fetch) wants
+  # onnxslim from its optional "export" extra; declared so fresh installs
+  # never attempt a runtime pip install during export.
+  "onnxslim>=0.1.71",
   "transformers>=5.3.0,<5.4.0",   # aligned with the physicalai PyPI release pin (>=5.3,<5.4)
   "peft==0.*",
   "wandb==0.*",
@@ -32,7 +36,7 @@ dependencies = [
 [project.optional-dependencies]
 cpu = ["torch>=2.5", "torchvision>=0.20"]
 xpu = ["torch>=2.5", "torchvision>=0.20"]
-dev = ["pytest>=8", "pytest-timeout>=2", "ruff>=0.6", "pre-commit>=3"]
+dev = ["pytest>=8", "pytest-timeout>=2", "ruff>=0.6", "pre-commit>=3", "jsonschema>=4"]
 
 [build-system]
 requires = ["hatchling"]
