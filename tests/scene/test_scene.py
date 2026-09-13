@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import hashlib
 import json
+from pathlib import Path
+
 import mujoco
 import numpy as np
 import pytest
@@ -17,27 +18,29 @@ from dinner_table.contracts.geometry import (
 )
 from dinner_table.scene.builder import Scene
 
+pytestmark = pytest.mark.fast
+
 CALIBRATION_FILE = Path("assets/meshes/so101/so101_calibration.json")
 
 
 def _in_zone(pos: np.ndarray, zone: tuple[float, float, float, float]) -> bool:
     """Check if 2D position falls within bounding rectangle (x_min, x_max, y_min, y_max)."""
-    if zone[0] <= pos[0] <= zone[1] and zone[2] <= pos[1] <= zone[3]:
-        return True
-    else:
-        return False
+    return bool(zone[0] <= pos[0] <= zone[1] and zone[2] <= pos[1] <= zone[3])
 
 
 def test_scene_compiles() -> None:
-    """Validate that Scene compiles cleanly without errors across seeds and all DR profiles."""
+    """Validate that Scene compiles cleanly without errors or warnings across seeds and profiles."""
     profiles = ("default", "dr_train", "eval_extreme")
-    # Sweep through representative seed ranges across all three profiles
     for profile in profiles:
-        for seed in range(15):
+        for seed in range(100):
             scene = Scene(seed=seed, dr_profile=profile)
             assert scene.model is not None, f"model is None for {profile} on seed {seed}"
             assert scene.ready is True, f"scene not ready for {profile} on seed {seed}"
             assert scene.model.nbody >= 8, f"unexpected body count for {profile} on seed {seed}"
+            warning_counts = [int(w.number) for w in scene.data.warning]
+            assert sum(warning_counts) == 0, (
+                f"MuJoCo warnings raised for {profile} on seed {seed}: {warning_counts}"
+            )
 
 
 def test_scene_determinism() -> None:

@@ -7,7 +7,11 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 from dinner_table.contracts.geometry import SO101_JOINT_SUFFIXES
+
+pytestmark = pytest.mark.fast
 
 
 def test_license_manifest_check() -> None:
@@ -36,7 +40,9 @@ def test_so101_stl_count() -> None:
     """Assert at least 8 STL files exist under assets/meshes/so101/."""
     so101_dir = pathlib.Path("assets/meshes/so101")
     stl_files = list(so101_dir.glob("*.stl"))
-    assert len(stl_files) >= 8, f"expected at least 8 STL files in {so101_dir}, found {len(stl_files)}"
+    assert len(stl_files) >= 8, (
+        f"expected at least 8 STL files in {so101_dir}, found {len(stl_files)}"
+    )
 
 
 def test_texture_counts() -> None:

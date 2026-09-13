@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import mujoco
 import numpy as np
+import pytest
 
 from dinner_table.scene.objects import (
     OBJECT_CATALOG,
@@ -12,6 +13,8 @@ from dinner_table.scene.objects import (
     instantiate,
     sample_spawns,
 )
+
+pytestmark = pytest.mark.fast
 
 
 def test_sample_spawns_bounds_and_quaternion_norm() -> None:
@@ -26,7 +29,7 @@ def test_sample_spawns_bounds_and_quaternion_norm() -> None:
             anchor = spec.spawn_anchor
             if name == "drawer_top":
                 jitter = 0.0
-            elif name.startswith("spoon") or name.startswith("fork"):
+            elif name.startswith(("spoon", "fork")):
                 jitter = UTENSIL_XY_JITTER_M
             else:
                 jitter = dr.spawn_xy_jitter_m

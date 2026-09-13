@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+
 import mujoco
 import numpy as np
 
@@ -148,7 +149,7 @@ def sample_spawns(
                 pos = np.array(spec.spawn_anchor, dtype=np.float64)
                 yaw = spec.spawn_yaw_rad
             else:
-                if name.startswith("spoon") or name.startswith("fork"):
+                if name.startswith(("spoon", "fork")):
                     jitter_limit = UTENSIL_XY_JITTER_M
                 else:
                     jitter_limit = dr.spawn_xy_jitter_m

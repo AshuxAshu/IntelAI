@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import logging
+from pathlib import Path
+
 import mujoco
 import numpy as np
 import yaml
@@ -13,10 +14,25 @@ from dinner_table.scene.objects import DrProfile
 
 logger = logging.getLogger(__name__)
 
-TABLE_TEXTURES = ["table/table_01.png", "table/table_02.png", "table/table_03.png", "table/table_04.png", "table/table_05.png"]
-FLOOR_TEXTURES = ["floor/floor_01.png", "floor/floor_02.png", "floor/floor_03.png", "floor/floor_04.png"]
+TABLE_TEXTURES = [
+    "table/table_01.png",
+    "table/table_02.png",
+    "table/table_03.png",
+    "table/table_04.png",
+    "table/table_05.png",
+]
+FLOOR_TEXTURES = [
+    "floor/floor_01.png",
+    "floor/floor_02.png",
+    "floor/floor_03.png",
+    "floor/floor_04.png",
+]
 WALL_TEXTURES = ["wall/wall_01.png", "wall/wall_02.png", "wall/wall_03.png"]
-PLACEMAT_TEXTURES = ["placemat/placemat_01.png", "placemat/placemat_02.png", "placemat/placemat_03.png"]
+PLACEMAT_TEXTURES = [
+    "placemat/placemat_01.png",
+    "placemat/placemat_02.png",
+    "placemat/placemat_03.png",
+]
 
 
 class RandomizerError(DinnerTableError):
@@ -59,12 +75,60 @@ def load_dr_profile(profile_name_or_path: str | Path) -> DrProfile:
     )
 
 
+def _kelvin_to_rgb(kelvin: float) -> tuple[float, float, float]:
+    """Convert a color temperature in Kelvin to peak-normalized RGB multipliers."""
+    t = kelvin / 100.0
+    if t <= 66.0:
+        r = 255.0
+        g = 99.4708025861 * np.log(t) - 161.1195681661
+    else:
+        r = 329.698727446 * (t - 60.0) ** -0.1332047592
+        g = 288.1221695283 * (t - 60.0) ** -0.0755148492
+    if t >= 66.0:
+        b = 255.0
+    else:
+        if t <= 19.0:
+            b = 0.0
+        else:
+            b = 138.5177312231 * np.log(t - 10.0) - 305.0447927307
+    r_c = float(np.clip(r, 0.0, 255.0))
+    g_c = float(np.clip(g, 0.0, 255.0))
+    b_c = float(np.clip(b, 0.0, 255.0))
+    peak = max(r_c, g_c, b_c)
+    if peak <= 0.0:
+        return (1.0, 1.0, 1.0)
+    return (r_c / peak, g_c / peak, b_c / peak)
+
+
+def _quat_multiply(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Return the Hamilton product of two wxyz quaternions."""
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return np.array(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ],
+        dtype=np.float64,
+    )
+
+
+def _euler_to_quat(rx: float, ry: float, rz: float) -> np.ndarray:
+    """Build a wxyz quaternion from small xyz Euler angles in radians."""
+    qx = np.array([np.cos(rx * 0.5), np.sin(rx * 0.5), 0.0, 0.0], dtype=np.float64)
+    qy = np.array([np.cos(ry * 0.5), 0.0, np.sin(ry * 0.5), 0.0], dtype=np.float64)
+    qz = np.array([np.cos(rz * 0.5), 0.0, 0.0, np.sin(rz * 0.5)], dtype=np.float64)
+    return _quat_multiply(_quat_multiply(qx, qy), qz)
+
+
 def apply_dr(
     spec: mujoco.MjSpec,
     rng: np.random.Generator,
     profile: str | DrProfile = "dr_train",
 ) -> None:
-    """Mutate MjSpec physics, lights, friction, and textures according to the DR profile."""
+    """Mutate MjSpec physics, lights, cameras, and textures according to the DR profile."""
     if isinstance(profile, str):
         dr = load_dr_profile(profile)
     else:
@@ -96,13 +160,29 @@ def apply_dr(
                             jnt.damping = float(jnt.damping * drawer_scale)
                             jnt.frictionloss = float(jnt.frictionloss * drawer_scale)
 
-    # Randomize lighting
+    # Randomize lighting intensity, color temperature, and position
     light_mult = rng.uniform(dr.light_intensity[0], dr.light_intensity[1])
+    kelvin = float(rng.uniform(dr.light_color_k[0], dr.light_color_k[1]))
+    color_mult = np.array(_kelvin_to_rgb(kelvin), dtype=np.float64)
     for light in spec.worldbody.lights:
-        light.diffuse = light.diffuse * light_mult
+        light.diffuse = light.diffuse * light_mult * color_mult
         light.specular = light.specular * light_mult
         if dr.light_pos_sigma_m > 0.0:
             light.pos = light.pos + rng.normal(0.0, dr.light_pos_sigma_m, size=3)
+
+    # Randomize camera orientation within the jitter bound
+    if dr.camera_jitter_deg > 0.0:
+        max_rad = float(np.deg2rad(dr.camera_jitter_deg))
+        for camera in spec.worldbody.cameras:
+            rx = float(rng.uniform(-max_rad, max_rad))
+            ry = float(rng.uniform(-max_rad, max_rad))
+            rz = float(rng.uniform(-max_rad, max_rad))
+            jitter_quat = _euler_to_quat(rx, ry, rz)
+            base_quat = np.array(camera.quat, dtype=np.float64)
+            if float(np.linalg.norm(base_quat)) < 1e-9:
+                base_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+            base_quat = base_quat / np.linalg.norm(base_quat)
+            camera.quat = _quat_multiply(jitter_quat, base_quat)
 
     if rng.random() < dr.texture_swap_probability:
         if dr.holdout_textures:

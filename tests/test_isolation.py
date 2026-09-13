@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.fast
+
 TARGET_PACKAGES = ("runtime", "executor", "perception", "reasoning")
 BANNED_STRINGS = (
     "object_pose(",
@@ -30,6 +34,5 @@ def test_privileged_state_isolation() -> None:
                         violations.append(f"{rel_path}: contains forbidden '{banned}'")
 
     assert len(violations) == 0, (
-        f"Isolation boundary violations detected ({len(violations)}):\n"
-        + "\n".join(violations)
+        f"Isolation boundary violations detected ({len(violations)}):\n" + "\n".join(violations)
     )

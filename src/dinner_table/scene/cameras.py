@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import mujoco
 import numpy as np
 
@@ -34,7 +35,7 @@ class CameraRig:
     def __init__(self, model_or_scene: object) -> None:
         """Initialize dedicated offscreen renderers for all cameras in CAMERA_NAMES."""
         if hasattr(model_or_scene, "model"):
-            self._model: mujoco.MjModel = getattr(model_or_scene, "model")
+            self._model: mujoco.MjModel = model_or_scene.model
             self._scene = model_or_scene
         else:
             self._model = model_or_scene

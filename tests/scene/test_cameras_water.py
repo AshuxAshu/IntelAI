@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import mujoco
 import numpy as np
+import pytest
 
 from dinner_table.contracts.geometry import POLICY_IMAGE_SIZE
+from dinner_table.scene import water
 from dinner_table.scene.builder import Scene
 from dinner_table.scene.cameras import CameraRig, resize_overhead_policy
-import dinner_table.scene.water as water
+
+pytestmark = pytest.mark.fast
 
 EXTENTS = {
     "plate": (0.09, 0.012),
@@ -99,12 +102,8 @@ def test_water_settle() -> None:
         fill_bottle = scene.fill_fraction("bottle")
         fill_mug = scene.fill_fraction("mug")
 
-        assert fill_bottle >= 0.90, (
-            f"bottle fill fraction {fill_bottle} < 0.90 on seed {seed}"
-        )
-        assert fill_mug <= 0.10, (
-            f"mug fill fraction {fill_mug} unexpectedly high on seed {seed}"
-        )
+        assert fill_bottle >= 0.90, f"bottle fill fraction {fill_bottle} < 0.90 on seed {seed}"
+        assert fill_mug <= 0.10, f"mug fill fraction {fill_mug} unexpectedly high on seed {seed}"
 
 
 def test_water_dynamic_scale_encoding() -> None:

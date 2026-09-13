@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
+
 import mujoco
 import numpy as np
 
@@ -22,7 +23,8 @@ from dinner_table.contracts.geometry import (
 from dinner_table.scene.cameras import CameraRig
 from dinner_table.scene.objects import instantiate, sample_spawns
 from dinner_table.scene.randomizer import apply_dr, load_dr_profile
-from dinner_table.scene.water import attach_water, fill_fraction as calc_fill_fraction
+from dinner_table.scene.water import attach_water
+from dinner_table.scene.water import fill_fraction as calc_fill_fraction
 
 CALIBRATION_FILE = Path("assets/meshes/so101/so101_calibration.json")
 SCENE_XML_PATH = Path("scenes/dinner_table.xml")
@@ -43,6 +45,19 @@ FRC_LIMITS = {
     "wrist_flex": 3.0,
     "wrist_roll": 2.0,
     "gripper": 2.0,
+}
+
+DRAWER_FRC_LIMIT = 8.0
+
+# Visual mesh asset per arm link, declared in scenes/dinner_table.xml
+LINK_MESHES = {
+    "base": ("so101_base", "so101_base_motor"),
+    "shoulder_pan": ("so101_shoulder",),
+    "shoulder_lift": ("so101_upper_arm",),
+    "elbow_flex": ("so101_lower_arm",),
+    "wrist_flex": ("so101_wrist_pitch",),
+    "wrist_roll": ("so101_wrist_roll",),
+    "gripper": ("so101_motor_holder",),
 }
 
 
@@ -106,7 +121,7 @@ class Scene:
         drawer_act.ctrllimited = True
         drawer_act.ctrlrange = np.array([0.0, DRAWER_TRAVEL], dtype=np.float64)
         drawer_act.forcelimited = True
-        drawer_act.forcerange = np.array([-25.0, 25.0], dtype=np.float64)
+        drawer_act.forcerange = np.array([-DRAWER_FRC_LIMIT, DRAWER_FRC_LIMIT], dtype=np.float64)
 
         # Apply domain randomization before compiling
         apply_dr(self.spec, rng, dr)
@@ -120,8 +135,27 @@ class Scene:
         self.reset()
         self.ready = True
 
-    def _attach_arm(self, spec: mujoco.MjSpec, prefix: str, pos: tuple[float, float, float], yaw: float) -> None:
-        """Attach one 6-joint SO-101 kinematic chain and tuned position actuators."""
+    def _add_visual_mesh(
+        self,
+        body: mujoco.MjsBody,
+        mesh_name: str,
+        pos: tuple[float, float, float] = (0.0, 0.0, 0.0),
+    ) -> None:
+        """Attach a massless non-colliding visual mesh geom to the given body."""
+        body.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_MESH,
+            meshname=mesh_name,
+            pos=np.array(pos, dtype=np.float64),
+            mass=0.0,
+            contype=0,
+            conaffinity=0,
+            group=1,
+        )
+
+    def _attach_arm(
+        self, spec: mujoco.MjSpec, prefix: str, pos: tuple[float, float, float], yaw: float
+    ) -> None:
+        """Attach one 6-joint SO-101 kinematic chain with visual meshes, jaws, and actuators."""
         half_yaw = yaw * 0.5
         quat = np.array([np.cos(half_yaw), 0.0, 0.0, np.sin(half_yaw)], dtype=np.float64)
 
@@ -132,18 +166,68 @@ class Scene:
             pos=np.array([0.0, 0.0, 0.01], dtype=np.float64),
             mass=0.2,
         )
+        for mesh_name in LINK_MESHES["base"]:
+            self._add_visual_mesh(base, mesh_name, pos=(0.0, 0.0, 0.01))
 
         parent_body = base
         link_configs = [
-            ("shoulder_pan", [0.0, 0.0, 0.058], [0.0, 0.0, 1.0], [0.025, 0.025, 0.0], [0.0, 0.0, 0.02], 0.15),
-            ("shoulder_lift", [0.0, 0.0, 0.052], [0.0, 1.0, 0.0], [0.022, 0.050, 0.0], [0.0, 0.0, 0.05], 0.18),
-            ("elbow_flex", [0.0, 0.0, 0.115], [0.0, 1.0, 0.0], [0.020, 0.045, 0.0], [0.0, 0.0, 0.045], 0.14),
-            ("wrist_flex", [0.0, 0.0, 0.095], [0.0, 1.0, 0.0], [0.018, 0.030, 0.0], [0.0, 0.0, 0.03], 0.10),
-            ("wrist_roll", [0.0, 0.0, 0.060], [0.0, 0.0, 1.0], [0.018, 0.025, 0.0], [0.0, 0.0, 0.02], 0.08),
-            ("gripper", [0.0, 0.0, 0.045], [0.0, 1.0, 0.0], [0.012, 0.020, 0.0], [0.0, 0.015, 0.025], 0.04),
+            (
+                "shoulder_pan",
+                [0.0, 0.0, 0.058],
+                [0.0, 0.0, 1.0],
+                [0.025, 0.025, 0.0],
+                [0.0, 0.0, 0.02],
+                0.15,
+                (0.0, 0.0, 0.0),
+            ),
+            (
+                "shoulder_lift",
+                [0.0, 0.0, 0.052],
+                [0.0, 1.0, 0.0],
+                [0.022, 0.050, 0.0],
+                [0.0, 0.0, 0.05],
+                0.18,
+                (0.0, 0.0, 0.03),
+            ),
+            (
+                "elbow_flex",
+                [0.0, 0.0, 0.115],
+                [0.0, 1.0, 0.0],
+                [0.020, 0.045, 0.0],
+                [0.0, 0.0, 0.045],
+                0.14,
+                (0.0, 0.0, 0.06),
+            ),
+            (
+                "wrist_flex",
+                [0.0, 0.0, 0.095],
+                [0.0, 1.0, 0.0],
+                [0.018, 0.030, 0.0],
+                [0.0, 0.0, 0.03],
+                0.10,
+                (0.0, 0.0, 0.03),
+            ),
+            (
+                "wrist_roll",
+                [0.0, 0.0, 0.060],
+                [0.0, 0.0, 1.0],
+                [0.018, 0.025, 0.0],
+                [0.0, 0.0, 0.02],
+                0.08,
+                (0.0, 0.0, 0.015),
+            ),
+            (
+                "gripper",
+                [0.0, 0.0, 0.045],
+                [0.0, 1.0, 0.0],
+                [0.009, 0.011, 0.005],
+                [0.0, 0.012, 0.007],
+                0.030,
+                (0.0, 0.012, 0.010),
+            ),
         ]
 
-        for suffix, rel_pos, axis, geom_size, geom_pos, mass in link_configs:
+        for suffix, rel_pos, axis, geom_size, geom_pos, mass, mesh_pos in link_configs:
             body = parent_body.add_body(name=f"{prefix}_{suffix}_link", pos=rel_pos)
             range_deg = self._calibration[suffix]["range_deg"]
             range_rad = np.deg2rad(range_deg)
@@ -159,12 +243,21 @@ class Scene:
                 range=range_rad,
                 damping=kv,
             )
-            body.add_geom(
-                type=mujoco.mjtGeom.mjGEOM_CAPSULE,
-                size=geom_size,
-                pos=geom_pos,
-                mass=mass,
-            )
+            if suffix == "gripper":
+                body.add_geom(
+                    type=mujoco.mjtGeom.mjGEOM_BOX,
+                    size=np.array(geom_size, dtype=np.float64),
+                    pos=np.array(geom_pos, dtype=np.float64),
+                    mass=mass,
+                )
+            else:
+                body.add_geom(
+                    type=mujoco.mjtGeom.mjGEOM_CAPSULE,
+                    size=np.array(geom_size, dtype=np.float64),
+                    pos=np.array(geom_pos, dtype=np.float64),
+                    mass=mass,
+                )
+            self._add_visual_mesh(body, LINK_MESHES[suffix][0], pos=mesh_pos)
 
             act = spec.add_actuator()
             act.name = f"{prefix}.{suffix}"
@@ -188,10 +281,40 @@ class Scene:
             act.forcerange = np.array([-frc, frc], dtype=np.float64)
 
             if suffix == "gripper":
-                body.add_site(name=f"{prefix}.ee", pos=[0.0, 0.0, 0.055], size=[0.005, 0.0, 0.0])
-                body.add_camera(name=f"wrist_{prefix}", pos=[0.0, 0.04, 0.06], quat=[0.92388, 0.38268, 0.0, 0.0], fovy=60.0)
+                self._attach_jaws(parent_body, body, prefix)
+                body.add_site(name=f"{prefix}.ee", pos=[0.0, 0.0, 0.040], size=[0.005, 0.0, 0.0])
+                body.add_camera(
+                    name=f"wrist_{prefix}",
+                    pos=[0.0, 0.04, 0.06],
+                    quat=[0.92388, 0.38268, 0.0, 0.0],
+                    fovy=60.0,
+                )
 
             parent_body = body
+
+    def _attach_jaws(
+        self, wrist_body: mujoco.MjsBody, gripper_body: mujoco.MjsBody, prefix: str
+    ) -> None:
+        """Attach fixed and moving gripper jaws so the gripper hinge opens and closes them."""
+        fixed_jaw = wrist_body.add_body(name=f"{prefix}_jaw_fixed", pos=[-0.007, 0.0, 0.062])
+        fixed_jaw.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=np.array([0.004, 0.010, 0.017], dtype=np.float64),
+            pos=np.array([0.0, 0.0, 0.017], dtype=np.float64),
+            mass=0.005,
+        )
+        self._add_visual_mesh(fixed_jaw, "so101_fixed_jaw", pos=(0.0, 0.0, 0.017))
+
+        moving_jaw = gripper_body.add_body(name=f"{prefix}_jaw_moving", pos=[0.0055, 0.0, 0.020])
+        jaw_quat = np.array([0.976296, 0.0, 0.216440, 0.0], dtype=np.float64)
+        moving_jaw.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=np.array([0.004, 0.010, 0.017], dtype=np.float64),
+            pos=np.array([0.0072, 0.0, 0.0154], dtype=np.float64),
+            quat=jaw_quat,
+            mass=0.005,
+        )
+        self._add_visual_mesh(moving_jaw, "so101_moving_jaw", pos=(0.0, 0.0, 0.017))
 
     def _attach_cameras(self, spec: mujoco.MjSpec) -> None:
         """Attach overhead and demo cameras to the worldbody."""
@@ -236,13 +359,12 @@ class Scene:
                 body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
                 if body_id != -1:
                     jnt_id = self.model.body_jntadr[body_id]
-                    if jnt_id != -1:
-                        if self.model.jnt_type[jnt_id] == mujoco.mjtJoint.mjJNT_FREE:
-                            qpos_adr = self.model.jnt_qposadr[jnt_id]
-                            self.data.qpos[qpos_adr : qpos_adr + 3] = pos
-                            self.data.qpos[qpos_adr + 3 : qpos_adr + 7] = quat
-                            dof_adr = self.model.jnt_dofadr[jnt_id]
-                            self.data.qvel[dof_adr : dof_adr + 6] = 0.0
+                    if jnt_id != -1 and self.model.jnt_type[jnt_id] == mujoco.mjtJoint.mjJNT_FREE:
+                        qpos_adr = self.model.jnt_qposadr[jnt_id]
+                        self.data.qpos[qpos_adr : qpos_adr + 3] = pos
+                        self.data.qpos[qpos_adr + 3 : qpos_adr + 7] = quat
+                        dof_adr = self.model.jnt_dofadr[jnt_id]
+                        self.data.qvel[dof_adr : dof_adr + 6] = 0.0
 
         # Reset drawer slide
         drawer_jnt = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "drawer_slide")
@@ -355,7 +477,4 @@ class Scene:
         if drawer_jnt == -1:
             return False
         qpos_idx = self.model.jnt_qposadr[drawer_jnt]
-        if float(self.data.qpos[qpos_idx]) > (DRAWER_TRAVEL * 0.5):
-            return True
-        else:
-            return False
+        return bool(float(self.data.qpos[qpos_idx]) > (DRAWER_TRAVEL * 0.5))
