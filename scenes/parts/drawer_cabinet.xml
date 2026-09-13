@@ -1,0 +1,15 @@
+<mujocoinclude>
+  <!-- Prismatic drawer cabinet with utensil slots and slide joint -->
+  <body name="cabinet" pos="0 0.62 0.18">
+    <geom name="cabinet_shell" type="box" size="0.28 0.09 0.18" class="furniture" contype="0" conaffinity="0"/>
+    <body name="drawer_top" pos="0 -0.02 0.07">
+      <!-- Prismatic drawer: slides toward table along -Y; frictionloss and damping are DR axes -->
+      <joint name="drawer_slide" type="slide" axis="0 -1 0" range="0 0.24"
+             damping="2" frictionloss="4" actuatorfrcrange="-25 25"/>
+      <geom name="drawer_box" type="box" size="0.24 0.07 0.05" class="furniture"/>
+      <site name="drawer_handle" pos="0 -0.075 0" size="0.005"/>
+      <site name="tray_slot_fork" pos="-0.10 -0.02 0.06" size="0.005"/>
+      <site name="tray_slot_spoon" pos="0.10 -0.02 0.06" size="0.005"/>
+    </body>
+  </body>
+</mujocoinclude>

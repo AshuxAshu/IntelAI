@@ -1,0 +1,11 @@
+<mujocoinclude>
+  <!-- Placemats on the dining table -->
+  <body name="placemat_1_body" pos="0.22 0.10 0.361">
+    <geom name="placemat_1_geom" type="box" size="0.14 0.10 0.001" class="furniture" contype="0" conaffinity="0"/>
+    <site name="placemat_1" pos="0 0 0.001" size="0.01"/>
+  </body>
+  <body name="placemat_2_body" pos="-0.22 0.10 0.361">
+    <geom name="placemat_2_geom" type="box" size="0.14 0.10 0.001" class="furniture" contype="0" conaffinity="0"/>
+    <site name="placemat_2" pos="0 0 0.001" size="0.01"/>
+  </body>
+</mujocoinclude>

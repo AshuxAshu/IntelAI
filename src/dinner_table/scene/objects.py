@@ -65,7 +65,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         grasp_class="rim",
     ),
     "mug": ObjectSpec(
-        physics=("cylinder", (0.04, 0.08, 0.0)),
+        physics=("cylinder", (0.04, 0.04, 0.0)),
         spawn_anchor=(-0.10, 0.05, TABLE_TOP_HEIGHT + 0.04),
         spawn_yaw_rad=0.0,
         mass_kg=0.30,
@@ -130,36 +130,55 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
 }
 
 
+MIN_PAIRWISE_DISTANCES = {
+    ("plate", "mug"): 0.135,
+    ("plate", "bottle"): 0.130,
+    ("mug", "bottle"): 0.085,
+}
+
+
 def sample_spawns(
     rng: np.random.Generator, dr: DrProfile
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
     """Sample bounded spawn positions (m) and yaw quaternions for all catalog objects."""
-    spawns: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    for name, spec in OBJECT_CATALOG.items():
-        if name == "drawer_top":
-            pos = np.array(spec.spawn_anchor, dtype=np.float64)
-            yaw = spec.spawn_yaw_rad
-        else:
-            if name.startswith("spoon") or name.startswith("fork"):
-                jitter_limit = UTENSIL_XY_JITTER_M
+    for _ in range(100):
+        spawns: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        for name, spec in OBJECT_CATALOG.items():
+            if name == "drawer_top":
+                pos = np.array(spec.spawn_anchor, dtype=np.float64)
+                yaw = spec.spawn_yaw_rad
             else:
-                jitter_limit = dr.spawn_xy_jitter_m
-            jitter_x = rng.uniform(-jitter_limit, jitter_limit)
-            jitter_y = rng.uniform(-jitter_limit, jitter_limit)
-            yaw_jitter = rng.uniform(-dr.spawn_yaw_jitter_rad, dr.spawn_yaw_jitter_rad)
-            pos = np.array(
-                [
-                    spec.spawn_anchor[0] + jitter_x,
-                    spec.spawn_anchor[1] + jitter_y,
-                    spec.spawn_anchor[2],
-                ],
-                dtype=np.float64,
-            )
-            yaw = spec.spawn_yaw_rad + yaw_jitter
+                if name.startswith("spoon") or name.startswith("fork"):
+                    jitter_limit = UTENSIL_XY_JITTER_M
+                else:
+                    jitter_limit = dr.spawn_xy_jitter_m
+                jitter_x = rng.uniform(-jitter_limit, jitter_limit)
+                jitter_y = rng.uniform(-jitter_limit, jitter_limit)
+                yaw_jitter = rng.uniform(-dr.spawn_yaw_jitter_rad, dr.spawn_yaw_jitter_rad)
+                pos = np.array(
+                    [
+                        spec.spawn_anchor[0] + jitter_x,
+                        spec.spawn_anchor[1] + jitter_y,
+                        spec.spawn_anchor[2],
+                    ],
+                    dtype=np.float64,
+                )
+                yaw = spec.spawn_yaw_rad + yaw_jitter
 
-        half_yaw = yaw * 0.5
-        quat = np.array([np.cos(half_yaw), 0.0, 0.0, np.sin(half_yaw)], dtype=np.float64)
-        spawns[name] = (pos, quat)
+            half_yaw = yaw * 0.5
+            quat = np.array([np.cos(half_yaw), 0.0, 0.0, np.sin(half_yaw)], dtype=np.float64)
+            spawns[name] = (pos, quat)
+
+        has_overlap = False
+        for (o1, o2), min_dist in MIN_PAIRWISE_DISTANCES.items():
+            if o1 in spawns and o2 in spawns:
+                dist_2d = float(np.linalg.norm(spawns[o1][0][:2] - spawns[o2][0][:2]))
+                if dist_2d < min_dist:
+                    has_overlap = True
+                    break
+        if not has_overlap:
+            return spawns
+
     return spawns
 
 
@@ -180,12 +199,21 @@ def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarr
         "sphere": mujoco.mjtGeom.mjGEOM_SPHERE,
     }
     mjt_type = geom_type_map[geom_type_str]
-    body.add_geom(
-        type=mjt_type,
-        size=geom_size,
-        mass=obj_spec.mass_kg,
-        friction=obj_spec.friction,
-    )
+    if geom_type_str == "capsule":
+        body.add_geom(
+            type=mjt_type,
+            size=geom_size,
+            mass=obj_spec.mass_kg,
+            friction=obj_spec.friction,
+            quat=np.array([0.7071068, 0.7071068, 0.0, 0.0], dtype=np.float64),
+        )
+    else:
+        body.add_geom(
+            type=mjt_type,
+            size=geom_size,
+            mass=obj_spec.mass_kg,
+            friction=obj_spec.friction,
+        )
     if obj_spec.visual_mesh is not None:
         mesh = spec.add_mesh(file=obj_spec.visual_mesh)
         body.add_geom(
