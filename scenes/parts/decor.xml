@@ -1,0 +1,18 @@
+<mujocoinclude>
+  <!-- Room floor -->
+  <geom name="floor" type="plane" size="2.5 2.5 0.1" pos="0 0 0" class="furniture"/>
+
+  <!-- Back wall -->
+  <geom name="wall" type="plane" size="2.5 1.5 0.1" pos="0 1.2 0.75" quat="0.7071068 0.7071068 0 0" class="furniture"/>
+
+  <!-- Potted plant on table corner (-0.35, 0.30, table) -->
+  <body name="plant" pos="-0.35 0.30 0.36">
+    <geom name="plant_pot" type="cylinder" size="0.04 0.03" pos="0 0 0.03" class="furniture"/>
+    <geom name="plant_foliage" type="sphere" size="0.06" pos="0 0 0.09" class="furniture"/>
+  </body>
+
+  <!-- Wall picture frame behind cabinet -->
+  <body name="wall_picture" pos="0 1.18 0.80" quat="0.7071068 0.7071068 0 0">
+    <geom name="picture_frame_geom" type="box" size="0.25 0.18 0.01" class="furniture"/>
+  </body>
+</mujocoinclude>

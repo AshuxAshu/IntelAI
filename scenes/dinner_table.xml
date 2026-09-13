@@ -1,0 +1,52 @@
+<mujoco model="dinner_table">
+  <compiler angle="radian" meshdir="../assets/meshes" texturedir="../assets/textures"/>
+  <option timestep="0.002" integrator="implicitfast" iterations="50"/>
+
+  <default>
+    <geom solref="0.005 1" solimp="0.95 0.99 0.001"/>
+    <default class="furniture">
+      <geom friction="0.8 0.005 0.0001" rgba="0.75 0.7 0.65 1"/>
+    </default>
+    <default class="visual">
+      <geom contype="0" conaffinity="0" group="1"/>
+    </default>
+    <default class="collision">
+      <geom group="0"/>
+    </default>
+  </default>
+
+  <asset>
+    <!-- Textures and materials -->
+    <texture name="table_tex" type="2d" file="table/table_01.png"/>
+    <material name="table_mat" texture="table_tex" specular="0.2" shininess="0.1"/>
+
+    <texture name="floor_tex" type="2d" file="floor/floor_01.png"/>
+    <material name="floor_mat" texture="floor_tex" specular="0.1" shininess="0.1"/>
+
+    <texture name="wall_tex" type="2d" file="wall/wall_01.png"/>
+    <material name="wall_mat" texture="wall_tex" specular="0.05" shininess="0.05"/>
+
+    <texture name="placemat_tex" type="2d" file="placemat/placemat_01.png"/>
+    <material name="placemat_mat" texture="placemat_tex" specular="0.1" shininess="0.1"/>
+
+    <!-- SO-101 meshes -->
+    <mesh name="so101_base" file="so101/Base.stl"/>
+    <mesh name="so101_base_motor" file="so101/Base_Motor_Holder.stl"/>
+    <mesh name="so101_shoulder" file="so101/Shoulder_Rotation_Pitch.stl"/>
+    <mesh name="so101_upper_arm" file="so101/Upper_Arm.stl"/>
+    <mesh name="so101_lower_arm" file="so101/Lower_Arm.stl"/>
+    <mesh name="so101_wrist_pitch" file="so101/Wrist_Pitch.stl"/>
+    <mesh name="so101_wrist_roll" file="so101/Wrist_Roll.stl"/>
+    <mesh name="so101_motor_holder" file="so101/Motor_Holder.stl"/>
+    <mesh name="so101_fixed_jaw" file="so101/Fixed_Jaw.stl"/>
+    <mesh name="so101_moving_jaw" file="so101/Moving_Jaw.stl"/>
+  </asset>
+
+  <worldbody>
+    <include file="parts/lights.xml"/>
+    <include file="parts/table.xml"/>
+    <include file="parts/drawer_cabinet.xml"/>
+    <include file="parts/placemats.xml"/>
+    <include file="parts/decor.xml"/>
+  </worldbody>
+</mujoco>
