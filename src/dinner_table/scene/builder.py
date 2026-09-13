@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
-import logging
 import mujoco
 import numpy as np
 
@@ -14,18 +13,16 @@ from dinner_table.contracts.geometry import (
     ARM_MOUNTS,
     ARM_ORIENTATIONS,
     CAMERA_NAMES,
+    CONTROL_HZ,
     DRAWER_TRAVEL,
     HOME_JOINTS,
     JOINT_NAMES,
-    OVERHEAD_RESOLUTION,
     PHYSICS_HZ,
-    POLICY_IMAGE_SIZE,
-    SO101_JOINT_SUFFIXES,
 )
-from dinner_table.scene.objects import OBJECT_CATALOG, instantiate, sample_spawns
+from dinner_table.scene.cameras import CameraRig
+from dinner_table.scene.objects import instantiate, sample_spawns
 from dinner_table.scene.randomizer import apply_dr, load_dr_profile
-
-logger = logging.getLogger(__name__)
+from dinner_table.scene.water import attach_water, fill_fraction as calc_fill_fraction
 
 CALIBRATION_FILE = Path("assets/meshes/so101/so101_calibration.json")
 SCENE_XML_PATH = Path("scenes/dinner_table.xml")
@@ -86,6 +83,9 @@ class Scene:
             if name != "drawer_top":
                 instantiate(self.spec, name, pose)
 
+        # Attach water in bottle
+        attach_water(self.spec, "bottle")
+
         # Attach cameras
         self._attach_cameras(self.spec)
 
@@ -115,8 +115,7 @@ class Scene:
         self.model = self.spec.compile()
         self.data = mujoco.MjData(self.model)
 
-        self._renderers: dict[str, mujoco.Renderer] = {}
-        self._depth_renderer: mujoco.Renderer | None = None
+        self.camera_rig = CameraRig(self.model)
 
         self.reset()
         self.ready = True
@@ -285,10 +284,10 @@ class Scene:
             mujoco.mj_step(self.model, self.data)
 
     def hold_safe(self) -> None:
-        """Command both arms to HOME_JOINTS smoothly over 1.0 s in 25 Hz increments."""
+        """Command both arms to HOME_JOINTS smoothly over 1.0 s in CONTROL_HZ increments."""
         q_start = self.qpos_12()
         q_home = np.concatenate([HOME_JOINTS["A"], HOME_JOINTS["B"]], dtype=np.float64)
-        steps = 25
+        steps = CONTROL_HZ
         dt = 1.0 / float(steps)
         for t in range(1, steps + 1):
             alpha = float(t) / float(steps)
@@ -300,50 +299,17 @@ class Scene:
         """Render uint8 RGB image from specified camera name."""
         if camera not in CAMERA_NAMES:
             raise SceneBuilderError(f"unknown camera name: {camera}")
-
-        if camera not in self._renderers:
-            if camera in ("wrist_A", "wrist_B"):
-                h, w = POLICY_IMAGE_SIZE
-            else:
-                h, w = OVERHEAD_RESOLUTION
-            self._renderers[camera] = mujoco.Renderer(self.model, h, w)
-
-        renderer = self._renderers[camera]
-        renderer.update_scene(self.data, camera=camera)
-        return renderer.render()
+        return self.camera_rig.render(camera, self.data)
 
     def render_depth(self) -> np.ndarray:
         """Render float32 depth map in meters from the overhead camera."""
-        if self._depth_renderer is None:
-            h, w = OVERHEAD_RESOLUTION
-            self._depth_renderer = mujoco.Renderer(self.model, h, w)
-            self._depth_renderer.enable_depth_rendering()
-
-        self._depth_renderer.update_scene(self.data, camera="overhead")
-        return self._depth_renderer.render()
+        return self.camera_rig.render_depth(self.data)
 
     def camera_intrinsics(self, camera: str) -> np.ndarray:
-        """Compute (3, 3) intrinsic matrix K from camera vertical field-of-view."""
+        """Compute 3x3 intrinsic matrix K from camera vertical field-of-view."""
         if camera not in CAMERA_NAMES:
             raise SceneBuilderError(f"unknown camera name: {camera}")
-
-        cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, camera)
-        fovy = float(self.model.cam_fovy[cam_id])
-
-        if camera in ("wrist_A", "wrist_B"):
-            h, w = POLICY_IMAGE_SIZE
-        else:
-            h, w = OVERHEAD_RESOLUTION
-
-        f = float(h) / (2.0 * np.tan(np.deg2rad(fovy) * 0.5))
-        return np.array(
-            [
-                [f, 0.0, float(w) * 0.5],
-                [0.0, f, float(h) * 0.5],
-                [0.0, 0.0, 1.0],
-            ],
-            dtype=np.float64,
-        )
+        return self.camera_rig.intrinsics(camera)
 
     def object_pose(self, name: str) -> tuple[np.ndarray, np.ndarray]:
         """Return privileged ground truth (pos, quat) for the named object."""
@@ -374,10 +340,11 @@ class Scene:
 
     def fill_fraction(self, container: str) -> float:
         """Return container water fill fraction from 0.0 to 1.0."""
-        return 0.0
+        return calc_fill_fraction(self.model, self.data, container)
 
     def settle(self, seconds: float) -> None:
-        """Advance physics with zero control targets for specified seconds."""
+        """Advance physics with zero arm control targets for specified seconds."""
+        self.data.ctrl[:ACTION_DIM] = 0.0
         num_steps = max(1, round(seconds * PHYSICS_HZ))
         for _ in range(num_steps):
             mujoco.mj_step(self.model, self.data)
