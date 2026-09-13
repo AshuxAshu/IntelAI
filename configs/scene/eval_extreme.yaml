@@ -1,0 +1,15 @@
+mass_scale: [0.3, 3.0]
+friction_scale: [0.2, 1.5]
+spawn_xy_jitter_m: 0.10
+spawn_yaw_jitter_rad: 0.52
+gripper_noise_sigma_rad: 0.052
+waypoint_jitter_m: 0.04
+light_intensity: [0.3, 2.0]
+light_color_k: [2500, 8000]
+light_pos_sigma_m: 0.15
+texture_swap_probability: 1.0
+holdout_textures: true
+camera_jitter_deg: 4.0
+drawer_friction_scale: [0.25, 3.0]
+perturb_event_probability: 0.50
+seed: null
