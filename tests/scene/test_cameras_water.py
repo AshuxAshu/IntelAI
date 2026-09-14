@@ -74,6 +74,7 @@ def test_cameras_visibility() -> None:
             assert ratio >= 0.95, (
                 f"Object {name} on seed {seed} visibility {ratio:.3f} is below 0.95 threshold"
             )
+        scene.close()
 
 
 def test_depth_range() -> None:
@@ -89,6 +90,7 @@ def test_depth_range() -> None:
     assert depth_error <= 0.005, (
         f"tabletop depth {center_depth:.5f} m deviates {depth_error:.5f} m from expectation {expected_depth:.5f} m (> 5 mm)"
     )
+    scene.close()
 
 
 def test_water_settle() -> None:
@@ -104,6 +106,7 @@ def test_water_settle() -> None:
 
         assert fill_bottle >= 0.90, f"bottle fill fraction {fill_bottle} < 0.90 on seed {seed}"
         assert fill_mug <= 0.10, f"mug fill fraction {fill_mug} unexpectedly high on seed {seed}"
+        scene.close()
 
 
 def test_water_dynamic_scale_encoding() -> None:
@@ -117,6 +120,7 @@ def test_water_dynamic_scale_encoding() -> None:
 
     water.set_fill_fraction(scene.model, "mug", 0.45)
     np.testing.assert_allclose(scene.fill_fraction("mug"), 0.45, atol=1e-3)
+    scene.close()
 
 
 def test_camera_rig_and_policy_resize() -> None:
@@ -140,3 +144,4 @@ def test_camera_rig_and_policy_resize() -> None:
     policy_img = resize_overhead_policy(obs.overhead)
     assert policy_img.shape == (128, 128, 3)
     assert policy_img.dtype == np.uint8
+    scene.close()

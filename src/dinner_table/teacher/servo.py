@@ -7,7 +7,6 @@ import numpy as np
 
 from dinner_table.scene.builder import Scene
 from dinner_table.teacher.ik import solve_ik
-from dinner_table.teacher.kinematics import set_arm_q, site_jacobian, site_pose
 
 SAG_TOL_M = 0.002
 SAG_SETTLE_STEPS = 250

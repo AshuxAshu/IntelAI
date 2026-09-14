@@ -35,13 +35,16 @@ def test_scene_compiles() -> None:
     for profile in profiles:
         for seed in range(100):
             scene = Scene(seed=seed, dr_profile=profile)
-            assert scene.model is not None, f"model is None for {profile} on seed {seed}"
-            assert scene.ready is True, f"scene not ready for {profile} on seed {seed}"
-            assert scene.model.nbody >= 8, f"unexpected body count for {profile} on seed {seed}"
-            warning_counts = [int(w.number) for w in scene.data.warning]
-            assert sum(warning_counts) == 0, (
-                f"MuJoCo warnings raised for {profile} on seed {seed}: {warning_counts}"
-            )
+            try:
+                assert scene.model is not None, f"model is None for {profile} on seed {seed}"
+                assert scene.ready is True, f"scene not ready for {profile} on seed {seed}"
+                assert scene.model.nbody >= 8, f"unexpected body count for {profile} on seed {seed}"
+                warning_counts = [int(w.number) for w in scene.data.warning]
+                assert sum(warning_counts) == 0, (
+                    f"MuJoCo warnings raised for {profile} on seed {seed}: {warning_counts}"
+                )
+            finally:
+                scene.close()
 
 
 def test_scene_determinism() -> None:
@@ -65,6 +68,8 @@ def test_scene_determinism() -> None:
     assert differing <= 4 and int(diff.max()) <= 2, (
         f"render mismatch: {differing} pixels differ, max delta {int(diff.max())}"
     )
+    scene_a.close()
+    scene_b.close()
 
 
 def test_stability() -> None:
@@ -95,6 +100,7 @@ def test_stability() -> None:
             pos, _ = scene.object_pose(name)
             assert abs(pos[0]) <= 0.50, f"{name} x={pos[0]} outside table footprint on seed {seed}"
             assert abs(pos[1]) <= 0.30, f"{name} y={pos[1]} outside table footprint on seed {seed}"
+        scene.close()
 
 
 def test_drawer_mechanics() -> None:
@@ -118,6 +124,7 @@ def test_drawer_mechanics() -> None:
         scene.data.ctrl[act_id] = 0.0
         scene.settle(1.5)
         assert scene.is_drawer_open() is False, f"drawer failed to close at friction scale {scale}"
+        scene.close()
 
 
 def test_arm_joint_ranges_match_official() -> None:
@@ -141,6 +148,7 @@ def test_arm_joint_ranges_match_official() -> None:
                 atol=1e-6,
                 err_msg=f"range mismatch for joint {joint_name}",
             )
+    scene.close()
 
 
 def test_spawn_reachability_bounds() -> None:
@@ -158,6 +166,7 @@ def test_spawn_reachability_bounds() -> None:
             assert is_reachable is True, (
                 f"object {name} at {pos} not inside reachability envelope on seed {seed}"
             )
+        scene.close()
 
 
 def _jaw_gap_center(model: mujoco.MjModel, data: mujoco.MjData, arm: str) -> np.ndarray:
@@ -187,6 +196,7 @@ def test_ee_site_at_jaw_gap_center() -> None:
             assert offset <= 0.002, (
                 f"{site_name} is {offset * 1000:.1f} mm from the jaw gap center (limit 2 mm)"
             )
+    scene.close()
 
 
 def test_grasp_hold_stability() -> None:
@@ -244,6 +254,7 @@ def test_grasp_hold_stability() -> None:
     rel_after = float(np.linalg.norm(data.site_xpos[ee_id] - data.xpos[fork_id]))
     drift_mm = abs(rel_after - rel_before) * 1000.0
     assert drift_mm < 5.0, f"held fork drifted {drift_mm:.2f} mm over a 2 s hold (limit 5 mm)"
+    scene.close()
 
 
 def solve_ik_for_hold(scene: Scene) -> np.ndarray:
