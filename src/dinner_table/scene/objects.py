@@ -54,6 +54,8 @@ class ObjectSpec:
     friction: tuple[float, float, float]
     visual_mesh: str | None
     grasp_class: str
+    grasp_geoms: tuple[tuple[str, tuple[float, ...], tuple[float, float, float], tuple[float, float, float, float] | None], ...] = ()
+    grasp_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 OBJECT_CATALOG: dict[str, ObjectSpec] = {
@@ -65,15 +67,22 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         friction=(0.8, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="rim",
+        grasp_offset=(-0.085, 0.0, 0.0),
     ),
     "mug": ObjectSpec(
         physics=("cylinder", (0.04, 0.04, 0.0)),
-        spawn_anchor=(-0.10, 0.05, TABLE_TOP_HEIGHT + 0.04),
-        spawn_yaw_rad=0.0,
+        spawn_anchor=(0.0, 0.10, TABLE_TOP_HEIGHT + 0.04),
+        spawn_yaw_rad=3.141592653589793,
         mass_kg=0.30,
         friction=(0.9, 0.005, 0.02),
         visual_mesh=None,
         grasp_class="handle",
+        grasp_geoms=(
+            ("capsule", (0.0035, 0.008, 0.0), (0.042, 0.0, 0.016), (0.7071068, 0.0, 0.7071068, 0.0)),
+            ("capsule", (0.0035, 0.016, 0.0), (0.050, 0.0, 0.0), None),
+            ("capsule", (0.0035, 0.008, 0.0), (0.042, 0.0, -0.016), (0.7071068, 0.0, 0.7071068, 0.0)),
+        ),
+        grasp_offset=(0.05, 0.0, 0.0),
     ),
     "bottle": ObjectSpec(
         physics=("cylinder", (0.035, 0.10, 0.0)),
@@ -83,6 +92,10 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         friction=(0.9, 0.005, 0.02),
         visual_mesh=None,
         grasp_class="neck",
+        grasp_geoms=(
+            ("cylinder", (0.010, 0.030, 0.0), (0.0, 0.0, 0.130), None),
+        ),
+        grasp_offset=(0.0, 0.0, 0.15),
     ),
     "spoon_1": ObjectSpec(
         physics=("capsule", (0.008, 0.08, 0.0)),
@@ -132,10 +145,12 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
 }
 
 
+# The mug's handle capsules extend ~5.5 cm beyond its cylinder wall, so pair
+# clearances must exceed anchor distance plus jitter plus handle reach.
 MIN_PAIRWISE_DISTANCES = {
-    ("plate", "mug"): 0.135,
-    ("plate", "bottle"): 0.130,
-    ("mug", "bottle"): 0.085,
+    ("plate", "mug"): 0.20,
+    ("plate", "bottle"): 0.13,
+    ("mug", "bottle"): 0.13,
 }
 
 
@@ -219,6 +234,19 @@ def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarr
             mass=obj_spec.mass_kg,
             friction=obj_spec.friction,
         )
+    for feat_type, feat_size, feat_pos, feat_quat in obj_spec.grasp_geoms:
+        feat_kwargs: dict = {
+            "type": geom_type_map[feat_type],
+            "size": np.array(feat_size, dtype=np.float64),
+            "pos": np.array(feat_pos, dtype=np.float64),
+            "density": 0.0,
+            "friction": obj_spec.friction,
+            "condim": 4,
+        }
+        if feat_quat is not None:
+            feat_kwargs["quat"] = np.array(feat_quat, dtype=np.float64)
+        feat_geom = body.add_geom(**feat_kwargs)
+        feat_geom.mass = 0.0
     if obj_spec.visual_mesh is not None:
         mesh = spec.add_mesh(file=obj_spec.visual_mesh)
         body.add_geom(

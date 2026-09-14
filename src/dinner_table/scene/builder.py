@@ -80,6 +80,13 @@ class SceneBuilderError(DinnerTableError):
     """Exception raised for scene construction or physics execution errors."""
 
 
+def quat_rot(quat: np.ndarray, vec: np.ndarray) -> np.ndarray:
+    """Rotate a vector by a wxyz quaternion."""
+    w, x, y, z = np.asarray(quat, dtype=np.float64) / np.linalg.norm(quat)
+    t = 2.0 * np.cross(np.array([x, y, z]), vec)
+    return vec + w * t + np.cross(np.array([x, y, z]), t)
+
+
 class Scene:
     """Complete physical simulation environment composed of table, dual arms, and objects."""
 
@@ -198,16 +205,16 @@ class Scene:
         link_configs = [
             (
                 "shoulder_pan",
-                [0.0, 0.0, 0.030],
+                [0.0, 0.0, 0.090],
                 [0.0, 0.0, 1.0],
                 [0.020, 0.020, 0.0],
-                [0.0, 0.0, 0.030],
+                [0.0, 0.0, 0.045],
                 0.15,
-                (0.0, 0.0, 0.025),
+                (0.0, 0.0, 0.060),
             ),
             (
                 "shoulder_lift",
-                [0.0, 0.0, 0.055],
+                [0.0, 0.0, 0.105],
                 [0.0, 1.0, 0.0],
                 [0.022, 0.120, 0.0],
                 [0.0, 0.0, 0.120],
@@ -221,7 +228,7 @@ class Scene:
                 [0.020, 0.085, 0.0],
                 [0.0, 0.0, 0.085],
                 0.14,
-                (0.0, 0.0, 0.065),
+                (0.0, 0.0, 0.075),
             ),
             (
                 "wrist_flex",
@@ -230,7 +237,7 @@ class Scene:
                 [0.018, 0.030, 0.0],
                 [0.0, 0.0, 0.030],
                 0.10,
-                (0.0, 0.0, 0.03),
+                (0.0, 0.0, 0.055),
             ),
             (
                 "wrist_roll",
@@ -255,6 +262,13 @@ class Scene:
         for config in link_configs:
             suffix, rel_pos, axis, geom_size, geom_pos, mass = config[:6]
             body_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
+            if suffix == "gripper":
+                # The real SO-101 gripper is perpendicular to the forearm (the
+                # official wrist_roll_follower STL carries the fixed finger at
+                # 90 degrees); the tool frame is rotated to match.
+                body_quat = np.array([0.7071068, 0.0, -0.7071068, 0.0], dtype=np.float64)
+                if prefix == "B":
+                    body_quat = np.array([0.7071068, 0.0, 0.7071068, 0.0], dtype=np.float64)
             body = parent_body.add_body(name=f"{prefix}_{suffix}_link", pos=rel_pos, quat=body_quat)
             range_deg = self._calibration[suffix]["range_deg"]
             range_rad = np.deg2rad(range_deg)
@@ -345,18 +359,21 @@ class Scene:
         )
         self._add_visual_mesh(gripper_body, "so101_motor_holder", pos=(0.0, 0.012 * mirror, 0.010))
 
-        fixed_jaw = wrist_body.add_body(
-            name=f"{prefix}_jaw_fixed", pos=[-0.008 * mirror, 0.0, 0.062]
-        )
+        # The fixed jaw rides on the wrist link (it must not rotate with the
+        # gripper hinge) but is laid out in the rotated gripper frame, so its
+        # wrist-frame pose is the L-rotation of its gripper-frame position.
+        jaw_local = np.array([-0.008 * mirror, 0.0, 0.034], dtype=np.float64)
+        jaw_quat = np.array(gripper_body.quat, dtype=np.float64)
+        jaw_wrist = np.array(gripper_body.pos, dtype=np.float64) + quat_rot(jaw_quat, jaw_local)
+        fixed_jaw = wrist_body.add_body(name=f"{prefix}_jaw_fixed", pos=jaw_wrist, quat=jaw_quat)
         fixed_jaw.add_geom(
             type=mujoco.mjtGeom.mjGEOM_BOX,
             size=np.array([0.004, 0.010, 0.017], dtype=np.float64),
-            pos=np.array([0.0, 0.0, 0.017], dtype=np.float64),
             friction=JAW_FRICTION,
             condim=4,
             mass=0.005,
         )
-        self._add_visual_mesh(fixed_jaw, "so101_fixed_jaw", pos=(0.0, 0.0, 0.017))
+        self._add_visual_mesh(fixed_jaw, "so101_fixed_jaw")
 
         moving_jaw = gripper_body.add_body(
             name=f"{prefix}_jaw_moving", pos=[0.0045 * mirror, 0.0, 0.020]
