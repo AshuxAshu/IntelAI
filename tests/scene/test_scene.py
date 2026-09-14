@@ -17,6 +17,7 @@ from dinner_table.contracts.geometry import (
     SO101_JOINT_SUFFIXES,
 )
 from dinner_table.scene.builder import Scene
+from dinner_table.teacher.kinematics import set_arm_q
 
 pytestmark = pytest.mark.fast
 
@@ -152,3 +153,106 @@ def test_spawn_reachability_bounds() -> None:
             assert is_reachable is True, (
                 f"object {name} at {pos} not inside reachability envelope on seed {seed}"
             )
+
+
+def _jaw_gap_center(model: mujoco.MjModel, data: mujoco.MjData, arm: str) -> np.ndarray:
+    """Return the world midpoint of the two jaw geoms at grasp aperture."""
+    gripper_jnt = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, f"{arm}.gripper")
+    lo = model.jnt_range[gripper_jnt][0]
+    data.qpos[model.jnt_qposadr[gripper_jnt]] = lo + 0.5 * (0.0 - lo)
+    mujoco.mj_forward(model, data)
+    centers: list[np.ndarray] = []
+    for name in (f"{arm}_jaw_fixed", f"{arm}_jaw_moving"):
+        bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+        for g in range(model.ngeom):
+            if model.geom_bodyid[g] == bid and model.geom_group[g] == 0:
+                centers.append(np.array(data.geom_xpos[g]))
+    return (centers[0] + centers[1]) / 2.0
+
+
+def test_ee_site_at_jaw_gap_center() -> None:
+    """Validate the ee and grasp sites coincide with the jaw pinch point within 2 mm."""
+    scene = Scene(seed=42, dr_profile="default")
+    for arm in ("A", "B"):
+        gap_center = _jaw_gap_center(scene.model, scene.data, arm)
+        for site_name in (f"{arm}.ee", f"{arm}.grasp"):
+            sid = mujoco.mj_name2id(scene.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
+            assert sid != -1, f"site {site_name} missing in compiled model"
+            offset = float(np.linalg.norm(scene.data.site_xpos[sid] - gap_center))
+            assert offset <= 0.002, (
+                f"{site_name} is {offset * 1000:.1f} mm from the jaw gap center (limit 2 mm)"
+            )
+
+
+def test_grasp_hold_stability() -> None:
+    """Validate a utensil held between the jaws does not slip over a 2 s hold."""
+    scene = Scene(seed=42, dr_profile="default")
+    model, data = scene.model, scene.data
+    grasp_q = solve_ik_for_hold(scene)
+    set_arm_q(data, "B", grasp_q)
+    mujoco.mj_forward(model, data)
+    ee_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "B.ee")
+    ee_pos = np.array(data.site_xpos[ee_id])
+
+    fork_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "fork_1")
+    adr = model.jnt_qposadr[model.body_jntadr[fork_id]]
+    data.qpos[adr : adr + 3] = ee_pos
+    data.qpos[adr + 3 : adr + 7] = [1.0, 0.0, 0.0, 0.0]
+    gripper_jnt = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "B.gripper")
+    lo = model.jnt_range[gripper_jnt][0]
+    data.qpos[model.jnt_qposadr[gripper_jnt]] = 0.115
+    mujoco.mj_forward(model, data)
+
+    act_ids = {
+        n: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, f"B.{n}")
+        for n in (
+            "shoulder_pan",
+            "shoulder_lift",
+            "elbow_flex",
+            "wrist_flex",
+            "wrist_roll",
+            "gripper",
+        )
+    }
+    for i, n in enumerate(
+        ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
+    ):
+        data.ctrl[act_ids[n]] = grasp_q[i]
+    data.ctrl[act_ids["gripper"]] = lo
+    data.qvel[:] = 0.0
+    for _ in range(500):
+        mujoco.mj_step(model, data)
+
+    jaw_contacts = sum(
+        1
+        for i in range(data.ncon)
+        if model.geom_bodyid[data.contact[i].geom1] == fork_id
+        or model.geom_bodyid[data.contact[i].geom2] == fork_id
+    )
+    rel_before = float(np.linalg.norm(data.site_xpos[ee_id] - data.xpos[fork_id]))
+    fork_z = float(data.xpos[fork_id][2])
+    assert jaw_contacts >= 2, f"grasp did not engage: {jaw_contacts} contacts on fork"
+    assert fork_z > 0.40, f"fork fell out of the grasp: z={fork_z:.3f}"
+
+    for _ in range(1000):
+        mujoco.mj_step(model, data)
+    rel_after = float(np.linalg.norm(data.site_xpos[ee_id] - data.xpos[fork_id]))
+    drift_mm = abs(rel_after - rel_before) * 1000.0
+    assert drift_mm < 5.0, f"held fork drifted {drift_mm:.2f} mm over a 2 s hold (limit 5 mm)"
+
+
+def solve_ik_for_hold(scene: Scene) -> np.ndarray:
+    """Solve a reachable down-facing grasp pose over the B-side table."""
+    from dinner_table.contracts.geometry import HOME_JOINTS
+    from dinner_table.teacher.ik import solve_ik
+
+    q0 = np.array(HOME_JOINTS["B"][:5], dtype=np.float64)
+    target = np.array([-0.22, 0.10, 0.45], dtype=np.float64)
+    return solve_ik(
+        scene.model,
+        scene.data,
+        "B.ee",
+        target,
+        np.array([0.0, 0.0, -1.0]),
+        q0=q0,
+    )

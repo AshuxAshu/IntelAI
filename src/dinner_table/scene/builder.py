@@ -50,6 +50,21 @@ FRC_LIMITS = {
 DRAWER_FRC_LIMIT = 8.0
 
 # Visual mesh asset per arm link, declared in scenes/dinner_table.xml
+# Visual mesh placements for the official SO-101 STLs, derived from the upstream
+# SO-ARM100 simulation assembly (their link frames mapped onto our +Z chain).
+VISUAL_MESH_PLACEMENTS: dict[
+    str, tuple[tuple[float, float, float], tuple[float, float, float, float]]
+] = {
+    "shoulder_pan": ((0.0266, 0.0, 0.0268), (0.0, 0.0, 0.0, 1.0)),
+    "shoulder_lift": ((0.0182, 0.0, 0.0651), (0.0, -0.7071, 0.0, 0.7071)),
+    "elbow_flex": ((0.0182, 0.0, 0.0648), (0.0, -0.7071, 0.0, 0.7071)),
+    "wrist_flex": ((0.0181, 0.0, 0.0), (0.7071, -0.7071, 0.0, 0.0)),
+    "wrist_roll": ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0)),
+    "base": ((-0.0064, 0.0, -0.0024), (0.5, 0.5, 0.5, 0.5)),
+    "base_motor": ((-0.0064, 0.0, -0.0024), (0.5, 0.5, 0.5, 0.5)),
+}
+
+
 LINK_MESHES = {
     "base": ("so101_base", "so101_base_motor"),
     "shoulder_pan": ("so101_shoulder",),
@@ -87,6 +102,11 @@ class Scene:
             raise SceneBuilderError(f"scene xml file missing: {SCENE_XML_PATH}")
 
         self.spec = mujoco.MjSpec.from_file(str(SCENE_XML_PATH))
+        # Wrist cameras sit ~5 cm from the jaws; the default near plane clips them.
+        self.spec.visual.map.znear = 0.005
+        # Noslip post-processing keeps light grasped objects from creeping out
+        # of the jaws between solver steps.
+        self.spec.option.noslip_iterations = 3
 
         # Attach dual SO-101 robot arms
         for arm in ("A", "B"):
@@ -140,17 +160,21 @@ class Scene:
         body: mujoco.MjsBody,
         mesh_name: str,
         pos: tuple[float, float, float] = (0.0, 0.0, 0.0),
+        quat: tuple[float, float, float, float] | np.ndarray | None = None,
     ) -> None:
         """Attach a massless non-colliding visual mesh geom to the given body."""
-        body.add_geom(
-            type=mujoco.mjtGeom.mjGEOM_MESH,
-            meshname=mesh_name,
-            pos=np.array(pos, dtype=np.float64),
-            mass=0.0,
-            contype=0,
-            conaffinity=0,
-            group=1,
-        )
+        geom_kwargs: dict = {
+            "type": mujoco.mjtGeom.mjGEOM_MESH,
+            "meshname": mesh_name,
+            "pos": np.array(pos, dtype=np.float64),
+            "mass": 0.0,
+            "contype": 0,
+            "conaffinity": 0,
+            "group": 1,
+        }
+        if quat is not None:
+            geom_kwargs["quat"] = np.array(quat, dtype=np.float64)
+        body.add_geom(**geom_kwargs)
 
     def _attach_arm(
         self, spec: mujoco.MjSpec, prefix: str, pos: tuple[float, float, float], yaw: float
@@ -166,8 +190,9 @@ class Scene:
             pos=np.array([0.0, 0.0, 0.01], dtype=np.float64),
             mass=0.2,
         )
-        for mesh_name in LINK_MESHES["base"]:
-            self._add_visual_mesh(base, mesh_name, pos=(0.0, 0.0, 0.01))
+        for mesh_name, key in (("so101_base", "base"), ("so101_base_motor", "base_motor")):
+            bpos, bquat = VISUAL_MESH_PLACEMENTS[key]
+            self._add_visual_mesh(base, mesh_name, pos=bpos, quat=bquat)
 
         parent_body = base
         link_configs = [
@@ -191,12 +216,12 @@ class Scene:
             ),
             (
                 "elbow_flex",
-                [0.0, 0.0, 0.250],
+                [0.0, 0.0, 0.240],
                 [0.0, 1.0, 0.0],
-                [0.020, 0.090, 0.0],
-                [0.0, 0.0, 0.090],
+                [0.020, 0.085, 0.0],
+                [0.0, 0.0, 0.085],
                 0.14,
-                (0.0, 0.0, 0.07),
+                (0.0, 0.0, 0.065),
             ),
             (
                 "wrist_flex",
@@ -228,7 +253,7 @@ class Scene:
         ]
 
         for config in link_configs:
-            suffix, rel_pos, axis, geom_size, geom_pos, mass, mesh_pos = config[:7]
+            suffix, rel_pos, axis, geom_size, geom_pos, mass = config[:6]
             body_quat = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
             body = parent_body.add_body(name=f"{prefix}_{suffix}_link", pos=rel_pos, quat=body_quat)
             range_deg = self._calibration[suffix]["range_deg"]
@@ -251,7 +276,15 @@ class Scene:
             )
             if suffix == "gripper":
                 self._attach_jaws(parent_body, body, prefix)
-                body.add_site(name=f"{prefix}.ee", pos=[0.0, 0.0, 0.055], size=[0.005, 0.0, 0.0])
+                # TCP and grasp frame sit at the jaw pinch point (midpoint of the
+                # jaw gap at grasp apertures) so IK targets the true grasp center.
+                site_x = 0.002
+                if prefix == "B":
+                    site_x = -0.002
+                body.add_site(name=f"{prefix}.ee", pos=[site_x, 0.0, 0.035], size=[0.005, 0.0, 0.0])
+                body.add_site(
+                    name=f"{prefix}.grasp", pos=[site_x, 0.0, 0.035], size=[0.005, 0.0, 0.0]
+                )
                 body.add_camera(
                     name=f"wrist_{prefix}",
                     pos=[0.0, -0.05, 0.05],
@@ -265,7 +298,8 @@ class Scene:
                     pos=np.array(geom_pos, dtype=np.float64),
                     mass=mass,
                 )
-                self._add_visual_mesh(body, LINK_MESHES[suffix][0], pos=mesh_pos)
+                vpos, vquat = VISUAL_MESH_PLACEMENTS[suffix]
+                self._add_visual_mesh(body, LINK_MESHES[suffix][0], pos=vpos, quat=vquat)
 
             act = spec.add_actuator()
             act.name = f"{prefix}.{suffix}"
@@ -300,6 +334,9 @@ class Scene:
         mirror = 1.0
         if prefix == "B":
             mirror = -1.0
+        # High torsional friction with condim 4 keeps grasped objects from
+        # spinning or sliding between the jaws during carry and hand-off.
+        JAW_FRICTION = np.array([1.0, 0.05, 0.01], dtype=np.float64)
         gripper_body.add_geom(
             type=mujoco.mjtGeom.mjGEOM_BOX,
             size=np.array([0.009, 0.011, 0.005], dtype=np.float64),
@@ -315,6 +352,8 @@ class Scene:
             type=mujoco.mjtGeom.mjGEOM_BOX,
             size=np.array([0.004, 0.010, 0.017], dtype=np.float64),
             pos=np.array([0.0, 0.0, 0.017], dtype=np.float64),
+            friction=JAW_FRICTION,
+            condim=4,
             mass=0.005,
         )
         self._add_visual_mesh(fixed_jaw, "so101_fixed_jaw", pos=(0.0, 0.0, 0.017))
@@ -326,7 +365,8 @@ class Scene:
             type=mujoco.mjtGeom.mjGEOM_BOX,
             size=np.array([0.004, 0.010, 0.017], dtype=np.float64),
             pos=np.array([0.0075 * mirror, 0.0, 0.016], dtype=np.float64),
-            quat=np.array([0.9914449, 0.0, 0.1305262 * mirror, 0.0], dtype=np.float64),
+            friction=JAW_FRICTION,
+            condim=4,
             mass=0.005,
         )
         self._add_visual_mesh(moving_jaw, "so101_moving_jaw", pos=(0.0075 * mirror, 0.0, 0.016))

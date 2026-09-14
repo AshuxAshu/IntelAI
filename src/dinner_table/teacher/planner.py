@@ -109,6 +109,22 @@ def _quintic(tau: float) -> float:
     return 10.0 * (t**3) - 15.0 * (t**4) + 6.0 * (t**5)
 
 
+def _segment_violates(
+    scene: Scene, arm: str, q_a: np.ndarray, q_b: np.ndarray, samples: int = 11
+) -> bool:
+    """Check keep-out and zone violations along an interpolated joint-space segment."""
+    site_name = f"{arm}.ee"
+    for idx in range(1, samples):
+        alpha = float(idx) / float(samples)
+        q_mid = (1.0 - alpha) * q_a + alpha * q_b
+        set_arm_q(scene.data, arm, q_mid)
+        mujoco.mj_forward(scene.model, scene.data)
+        pos_mid, _ = site_pose(scene.data, site_name)
+        if _violates_constraints(pos_mid, arm):
+            return True
+    return False
+
+
 def plan_corridor(
     scene: Scene,
     arm: str,
@@ -140,11 +156,15 @@ def plan_corridor(
 
         if can_build_standard:
             has_violation = False
-            for q_wp in candidate_waypoints:
+            for wp_idx in range(len(candidate_waypoints)):
+                q_wp = candidate_waypoints[wp_idx]
                 set_arm_q(scene.data, arm, q_wp)
                 mujoco.mj_forward(scene.model, scene.data)
                 pos_wp, _ = site_pose(scene.data, site_name)
-                if _violates_constraints(pos_wp, arm):
+                violates = _violates_constraints(pos_wp, arm)
+                if not violates and wp_idx > 0:
+                    violates = _segment_violates(scene, arm, candidate_waypoints[wp_idx - 1], q_wp)
+                if violates:
                     has_violation = True
                     break
             if not has_violation:
@@ -156,13 +176,21 @@ def plan_corridor(
         q_lift_goal = q_goal + lift_alpha * (home_q - q_goal)
         detour_waypoints = [q_start, q_lift_start, q_lift_goal, q_goal]
 
-        for q_wp in detour_waypoints:
+        for wp_idx, q_wp in enumerate(detour_waypoints):
             set_arm_q(scene.data, arm, q_wp)
             mujoco.mj_forward(scene.model, scene.data)
             pos_wp, _ = site_pose(scene.data, site_name)
             if _violates_constraints(pos_wp, arm):
                 raise CorridorBlocked(
                     f"Detour waypoint at {pos_wp.tolist()} violates keep-out constraints."
+                )
+            segment_bad = wp_idx > 0 and _segment_violates(
+                scene, arm, detour_waypoints[wp_idx - 1], q_wp
+            )
+            if segment_bad:
+                raise CorridorBlocked(
+                    "Detour segment violates keep-out constraints between waypoints "
+                    f"{wp_idx - 1} and {wp_idx}."
                 )
 
         return detour_waypoints
