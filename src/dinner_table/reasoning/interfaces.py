@@ -1,6 +1,6 @@
 """VLM engine protocol. Implemented twice, both real components:
 - TransformersVlmEngine  (reasoning/vlm_runtime.py, Dev A) - HF transformers
-  backend used for SFT evaluation, the Qwen2.5-VL comparison, and hosts
+  backend used for SFT evaluation, the Qwen-VL comparison, and hosts
   without openvino-genai.
 - OvGenaiVlmEngine       (runtime/engines.py, Dev B) - openvino-genai INT8
   backend used in the deployed Intel pipeline.

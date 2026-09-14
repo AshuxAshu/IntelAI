@@ -1,0 +1,16 @@
+model,backend,device,precision,p50_ms,p90_ms,p95_ms,p99_ms,throughput_ips,cold_compile_s,weights,activations,rss_delta_mb,prefill_tok_s,decode_tok_s,e2e_128tok_s,num_iters,error
+act,openvino,CPU,FP32,17.608,19.067,19.758,22.149,56.4,0.38,FP32,FP32,348.6,,,,200,
+act,openvino,GPU.0,FP32,20.402,22.263,24.179,27.514,49.12,0.67,FP32,FP32,165.5,,,,200,
+act,openvino,CPU,FP16,18.496,20.261,21.161,21.822,53.62,0.65,FP16,FP32,228.9,,,,200,
+act,openvino,GPU.0,FP16,18.66,22.462,27.543,140.396,40.22,0.57,FP16,FP32,25.6,,,,200,
+act,openvino,CPU,INT8,6.113,7.137,7.949,11.005,159.81,0.58,INT8,INT8,126.2,,,,200,
+act,openvino,GPU.0,INT8,19.348,22.238,23.564,24.73,55.15,0.86,INT8,INT8,38.4,,,,200,
+act,pytorch,cpu,FP32,33.242,38.804,44.041,194.986,25.96,1.09,FP32,FP32,826.0,,,,200,
+yolo,openvino,CPU,FP32,20.1,22.92,25.383,29.771,48.28,0.24,FP32,FP32,9.0,,,,200,
+yolo,openvino,GPU.0,FP32,37.56,44.598,46.179,50.845,27.16,0.53,FP32,FP32,113.7,,,,200,
+vlm,openvino,CPU,INT8,11844.315,12138.8,12218.335,12281.963,,2.68,INT8,FP16,56.7,128.27,14.16,11.844,,
+vlm,,GPU.0,,,,,,,,,,,,,,,"Exception from src/inference/src/cpp/infer_request.cpp:224:
+Check 'args[i].index < data.inputs.size() && data.inputs[args[i].index]' failed at src/plugins/intel_gpu/src/runtime/ocl/ocl_stream.cpp:92:
+The allocated input memory is necessary to set kernel arguments.
+
+"

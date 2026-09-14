@@ -1,0 +1,263 @@
+{
+  "schema": "bench/1.2",
+  "host": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13620H",
+    "devices": [
+      "CPU",
+      "GPU.0",
+      "GPU.1"
+    ],
+    "device_properties": {
+      "CPU": {
+        "FULL_DEVICE_NAME": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "DEVICE_TYPE": "INTEGRATED",
+        "DEVICE_ARCHITECTURE": "intel64",
+        "OPTIMIZATION_CAPABILITIES": [
+          "FP32",
+          "INT8",
+          "BIN",
+          "EXPORT_IMPORT"
+        ],
+        "RANGE_FOR_STREAMS": [
+          1,
+          16
+        ]
+      },
+      "GPU.0": {
+        "FULL_DEVICE_NAME": "Intel(R) UHD Graphics (iGPU)",
+        "DEVICE_TYPE": "INTEGRATED",
+        "DEVICE_ARCHITECTURE": "GPU: vendor=0x8086 arch=v12.3.0",
+        "OPTIMIZATION_CAPABILITIES": [
+          "FP32",
+          "BIN",
+          "FP16",
+          "INT8",
+          "GPU_USM_MEMORY",
+          "EXPORT_IMPORT"
+        ],
+        "GPU_EXECUTION_UNITS_COUNT": 64,
+        "GPU_DEVICE_TOTAL_MEM_SIZE": 14922551296,
+        "RANGE_FOR_STREAMS": [
+          1,
+          2
+        ]
+      },
+      "GPU.1": {
+        "FULL_DEVICE_NAME": "NVIDIA GeForce RTX 4050 Laptop GPU (dGPU)",
+        "DEVICE_TYPE": "DISCRETE",
+        "DEVICE_ARCHITECTURE": "GPU: vendor=0x10de arch=v8.9.0",
+        "OPTIMIZATION_CAPABILITIES": [
+          "FP32",
+          "BIN",
+          "INT8",
+          "EXPORT_IMPORT"
+        ],
+        "GPU_EXECUTION_UNITS_COUNT": 20,
+        "GPU_DEVICE_TOTAL_MEM_SIZE": 6081347584,
+        "RANGE_FOR_STREAMS": [
+          1,
+          2
+        ]
+      }
+    },
+    "power_profile": null,
+    "ram_total_gb": 15.25,
+    "physicalai": "0.1.1",
+    "physicalai_train": "0.1.0",
+    "openvino": "2026.1.0",
+    "nncf": "3.3.0",
+    "npu_available": false,
+    "os": "Linux-7.2.2-1-cachyos-x86_64-with-glibc2.44",
+    "timestamp_utc": "2026-09-13T00:29:15.821857+00:00"
+  },
+  "runs": [
+    {
+      "model": "act",
+      "backend": "openvino",
+      "device": "CPU",
+      "precision": "FP32",
+      "latency_ms": {
+        "p50": 17.608,
+        "p90": 19.067,
+        "p95": 19.758,
+        "p99": 22.149
+      },
+      "throughput_ips": 56.4,
+      "num_iters": 200,
+      "cold_compile_s": 0.38,
+      "weights": "FP32",
+      "activations": "FP32",
+      "rss_delta_mb": 348.6
+    },
+    {
+      "model": "act",
+      "backend": "openvino",
+      "device": "GPU.0",
+      "precision": "FP32",
+      "latency_ms": {
+        "p50": 20.402,
+        "p90": 22.263,
+        "p95": 24.179,
+        "p99": 27.514
+      },
+      "throughput_ips": 49.12,
+      "num_iters": 200,
+      "cold_compile_s": 0.67,
+      "weights": "FP32",
+      "activations": "FP32",
+      "rss_delta_mb": 165.5
+    },
+    {
+      "model": "act",
+      "backend": "openvino",
+      "device": "CPU",
+      "precision": "FP16",
+      "latency_ms": {
+        "p50": 18.496,
+        "p90": 20.261,
+        "p95": 21.161,
+        "p99": 21.822
+      },
+      "throughput_ips": 53.62,
+      "num_iters": 200,
+      "cold_compile_s": 0.65,
+      "weights": "FP16",
+      "activations": "FP32",
+      "rss_delta_mb": 228.9
+    },
+    {
+      "model": "act",
+      "backend": "openvino",
+      "device": "GPU.0",
+      "precision": "FP16",
+      "latency_ms": {
+        "p50": 18.66,
+        "p90": 22.462,
+        "p95": 27.543,
+        "p99": 140.396
+      },
+      "throughput_ips": 40.22,
+      "num_iters": 200,
+      "cold_compile_s": 0.57,
+      "weights": "FP16",
+      "activations": "FP32",
+      "rss_delta_mb": 25.6
+    },
+    {
+      "model": "act",
+      "backend": "openvino",
+      "device": "CPU",
+      "precision": "INT8",
+      "latency_ms": {
+        "p50": 6.113,
+        "p90": 7.137,
+        "p95": 7.949,
+        "p99": 11.005
+      },
+      "throughput_ips": 159.81,
+      "num_iters": 200,
+      "cold_compile_s": 0.58,
+      "weights": "INT8",
+      "activations": "INT8",
+      "rss_delta_mb": 126.2
+    },
+    {
+      "model": "act",
+      "backend": "openvino",
+      "device": "GPU.0",
+      "precision": "INT8",
+      "latency_ms": {
+        "p50": 19.348,
+        "p90": 22.238,
+        "p95": 23.564,
+        "p99": 24.73
+      },
+      "throughput_ips": 55.15,
+      "num_iters": 200,
+      "cold_compile_s": 0.86,
+      "weights": "INT8",
+      "activations": "INT8",
+      "rss_delta_mb": 38.4
+    },
+    {
+      "model": "act",
+      "backend": "pytorch",
+      "device": "cpu",
+      "precision": "FP32",
+      "latency_ms": {
+        "p50": 33.242,
+        "p90": 38.804,
+        "p95": 44.041,
+        "p99": 194.986
+      },
+      "throughput_ips": 25.96,
+      "num_iters": 200,
+      "cold_compile_s": 1.09,
+      "weights": "FP32",
+      "activations": "FP32",
+      "rss_delta_mb": 826.0
+    },
+    {
+      "model": "yolo",
+      "backend": "openvino",
+      "device": "CPU",
+      "precision": "FP32",
+      "latency_ms": {
+        "p50": 20.1,
+        "p90": 22.92,
+        "p95": 25.383,
+        "p99": 29.771
+      },
+      "throughput_ips": 48.28,
+      "num_iters": 200,
+      "cold_compile_s": 0.24,
+      "weights": "FP32",
+      "activations": "FP32",
+      "rss_delta_mb": 9.0
+    },
+    {
+      "model": "yolo",
+      "backend": "openvino",
+      "device": "GPU.0",
+      "precision": "FP32",
+      "latency_ms": {
+        "p50": 37.56,
+        "p90": 44.598,
+        "p95": 46.179,
+        "p99": 50.845
+      },
+      "throughput_ips": 27.16,
+      "num_iters": 200,
+      "cold_compile_s": 0.53,
+      "weights": "FP32",
+      "activations": "FP32",
+      "rss_delta_mb": 113.7
+    },
+    {
+      "model": "vlm",
+      "backend": "openvino",
+      "device": "CPU",
+      "precision": "INT8",
+      "latency_ms": {
+        "p50": 11844.315,
+        "p90": 12138.8,
+        "p95": 12218.335,
+        "p99": 12281.963
+      },
+      "prefill_tok_s": 128.27,
+      "decode_tok_s": 14.16,
+      "e2e_128tok_s": 11.844,
+      "tokens_generated": 128,
+      "reps": 5,
+      "cold_compile_s": 2.68,
+      "weights": "INT8",
+      "activations": "FP16",
+      "rss_delta_mb": 56.7
+    },
+    {
+      "model": "vlm",
+      "device": "GPU.0",
+      "error": "Exception from src/inference/src/cpp/infer_request.cpp:224:\nCheck 'args[i].index < data.inputs.size() && data.inputs[args[i].index]' failed at src/plugins/intel_gpu/src/runtime/ocl/ocl_stream.cpp:92:\nThe allocated input memory is necessary to set kernel arguments.\n\n"
+    }
+  ]
+}
