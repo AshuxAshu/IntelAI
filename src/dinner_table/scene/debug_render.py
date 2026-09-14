@@ -69,7 +69,6 @@ def render_debug(seed: int, arm: str, target: tuple[float, float, float], out_pa
 
     frames = []
     for cam in ("overhead", "demo_cam"):
-        scene.render(cam)
         img = scene.render(cam).copy()
         frames.append(img)
     # overlay the target and path via a small site marker is not possible post-render;

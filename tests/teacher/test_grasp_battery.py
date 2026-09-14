@@ -44,7 +44,9 @@ def _check_solution(
     pos_err = float(np.linalg.norm(fk_pos - target_pos))
     tool_z = fk_rot[:, 2]
     app_unit = target_app / np.linalg.norm(target_app)
-    ang_err = float(np.linalg.norm(np.cross(tool_z, app_unit)))
+    # Dot-product angle rejects anti-aligned tools that a cross norm would pass.
+    approach_dot = float(np.clip(np.dot(tool_z, app_unit), -1.0, 1.0))
+    ang_err = float(np.arccos(approach_dot))
 
     assert pos_err <= pos_tol, (
         f"FK position error {pos_err * 1000:.2f} mm exceeds tolerance {pos_tol * 1000:.1f} mm"

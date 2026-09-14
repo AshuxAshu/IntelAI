@@ -296,7 +296,10 @@ def solve_ik(
                 ang_err = np.cross(cur_approach, t_app)
 
                 pos_err_norm = float(np.linalg.norm(pos_err))
-                ang_err_norm = float(np.linalg.norm(ang_err))
+                # The cross-product norm is zero for anti-aligned tools too,
+                # so the convergence angle must come from the dot product.
+                approach_dot = float(np.clip(np.dot(cur_approach, t_app), -1.0, 1.0))
+                ang_err_norm = float(np.arccos(approach_dot))
 
                 if pos_err_norm < pos_tol and ang_err_norm < ang_tol:
                     return q
