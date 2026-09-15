@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
 import mujoco
 import numpy as np
 
 from dinner_table.config import DinnerTableError
 from dinner_table.contracts.geometry import (
     ACTION_DIM,
-    ARM_MOUNTS,
-    ARM_ORIENTATIONS,
     CAMERA_NAMES,
     CONTROL_HZ,
     DRAWER_TRAVEL,
@@ -19,31 +19,15 @@ from dinner_table.contracts.geometry import (
     JOINT_NAMES,
     PHYSICS_HZ,
 )
+from dinner_table.scene.arms import attach_arms, expand_includes
 from dinner_table.scene.cameras import CameraRig
 from dinner_table.scene.objects import instantiate, sample_spawns
 from dinner_table.scene.randomizer import apply_dr, load_dr_profile
-from dinner_table.scene.water import attach_water, fill_fraction as calc_fill_fraction
+from dinner_table.scene.water import attach_water
+from dinner_table.scene.water import fill_fraction as calc_fill_fraction
 
 CALIBRATION_FILE = Path("assets/meshes/so101/so101_calibration.json")
 SCENE_XML_PATH = Path("scenes/dinner_table.xml")
-
-KP_GAINS = {
-    "shoulder_pan": 40.0,
-    "shoulder_lift": 40.0,
-    "elbow_flex": 30.0,
-    "wrist_flex": 20.0,
-    "wrist_roll": 15.0,
-    "gripper": 10.0,
-}
-
-FRC_LIMITS = {
-    "shoulder_pan": 6.0,
-    "shoulder_lift": 6.0,
-    "elbow_flex": 4.0,
-    "wrist_flex": 3.0,
-    "wrist_roll": 2.0,
-    "gripper": 2.0,
-}
 
 
 class SceneBuilderError(DinnerTableError):
@@ -71,11 +55,16 @@ class Scene:
         if not SCENE_XML_PATH.is_file():
             raise SceneBuilderError(f"scene xml file missing: {SCENE_XML_PATH}")
 
-        self.spec = mujoco.MjSpec.from_file(str(SCENE_XML_PATH))
-
-        # Attach dual SO-101 robot arms
-        for arm in ("A", "B"):
-            self._attach_arm(self.spec, prefix=arm, pos=ARM_MOUNTS[arm], yaw=ARM_ORIENTATIONS[arm])
+        # Expand scene part includes, merge both official SO-101 arms, then hand
+        # the flat MJCF to MjSpec for the programmatic passes below. Absolute
+        # mesh/texture dirs keep asset resolution independent of the xml origin.
+        scene_root = ET.parse(SCENE_XML_PATH).getroot()
+        expand_includes(scene_root, SCENE_XML_PATH.parent)
+        attach_arms(scene_root)
+        compiler = scene_root.find("compiler")
+        compiler.set("meshdir", str((SCENE_XML_PATH.parent / "../assets/meshes").resolve()))
+        compiler.set("texturedir", str((SCENE_XML_PATH.parent / "../assets/textures").resolve()))
+        self.spec = mujoco.MjSpec.from_string(ET.tostring(scene_root, encoding="unicode"))
 
         # Sample and instantiate objects
         self._spawns = sample_spawns(rng, dr)
@@ -119,79 +108,6 @@ class Scene:
 
         self.reset()
         self.ready = True
-
-    def _attach_arm(self, spec: mujoco.MjSpec, prefix: str, pos: tuple[float, float, float], yaw: float) -> None:
-        """Attach one 6-joint SO-101 kinematic chain and tuned position actuators."""
-        half_yaw = yaw * 0.5
-        quat = np.array([np.cos(half_yaw), 0.0, 0.0, np.sin(half_yaw)], dtype=np.float64)
-
-        base = spec.worldbody.add_body(name=f"{prefix}_base", pos=pos, quat=quat)
-        base.add_geom(
-            type=mujoco.mjtGeom.mjGEOM_BOX,
-            size=np.array([0.05, 0.05, 0.01], dtype=np.float64),
-            pos=np.array([0.0, 0.0, 0.01], dtype=np.float64),
-            mass=0.2,
-        )
-
-        parent_body = base
-        link_configs = [
-            ("shoulder_pan", [0.0, 0.0, 0.058], [0.0, 0.0, 1.0], [0.025, 0.025, 0.0], [0.0, 0.0, 0.02], 0.15),
-            ("shoulder_lift", [0.0, 0.0, 0.052], [0.0, 1.0, 0.0], [0.022, 0.050, 0.0], [0.0, 0.0, 0.05], 0.18),
-            ("elbow_flex", [0.0, 0.0, 0.115], [0.0, 1.0, 0.0], [0.020, 0.045, 0.0], [0.0, 0.0, 0.045], 0.14),
-            ("wrist_flex", [0.0, 0.0, 0.095], [0.0, 1.0, 0.0], [0.018, 0.030, 0.0], [0.0, 0.0, 0.03], 0.10),
-            ("wrist_roll", [0.0, 0.0, 0.060], [0.0, 0.0, 1.0], [0.018, 0.025, 0.0], [0.0, 0.0, 0.02], 0.08),
-            ("gripper", [0.0, 0.0, 0.045], [0.0, 1.0, 0.0], [0.012, 0.020, 0.0], [0.0, 0.015, 0.025], 0.04),
-        ]
-
-        for suffix, rel_pos, axis, geom_size, geom_pos, mass in link_configs:
-            body = parent_body.add_body(name=f"{prefix}_{suffix}_link", pos=rel_pos)
-            range_deg = self._calibration[suffix]["range_deg"]
-            range_rad = np.deg2rad(range_deg)
-
-            kp = KP_GAINS[suffix]
-            kv = kp * 0.05
-            frc = FRC_LIMITS[suffix]
-
-            body.add_joint(
-                name=f"{prefix}.{suffix}",
-                type=mujoco.mjtJoint.mjJNT_HINGE,
-                axis=axis,
-                range=range_rad,
-                damping=kv,
-            )
-            body.add_geom(
-                type=mujoco.mjtGeom.mjGEOM_CAPSULE,
-                size=geom_size,
-                pos=geom_pos,
-                mass=mass,
-            )
-
-            act = spec.add_actuator()
-            act.name = f"{prefix}.{suffix}"
-            act.target = f"{prefix}.{suffix}"
-            act.trntype = mujoco.mjtTrn.mjTRN_JOINT
-            act.gaintype = mujoco.mjtGain.mjGAIN_FIXED
-            act.biastype = mujoco.mjtBias.mjBIAS_AFFINE
-
-            gp = np.zeros(10, dtype=np.float64)
-            gp[0] = kp
-            act.gainprm = gp
-
-            bp = np.zeros(10, dtype=np.float64)
-            bp[1] = -kp
-            bp[2] = -kv
-            act.biasprm = bp
-
-            act.ctrllimited = True
-            act.ctrlrange = np.array(range_rad, dtype=np.float64)
-            act.forcelimited = True
-            act.forcerange = np.array([-frc, frc], dtype=np.float64)
-
-            if suffix == "gripper":
-                body.add_site(name=f"{prefix}.ee", pos=[0.0, 0.0, 0.055], size=[0.005, 0.0, 0.0])
-                body.add_camera(name=f"wrist_{prefix}", pos=[0.0, 0.04, 0.06], quat=[0.92388, 0.38268, 0.0, 0.0], fovy=60.0)
-
-            parent_body = body
 
     def _attach_cameras(self, spec: mujoco.MjSpec) -> None:
         """Attach overhead and demo cameras to the worldbody."""
@@ -249,6 +165,26 @@ class Scene:
         if drawer_jnt != -1:
             self.data.qpos[self.model.jnt_qposadr[drawer_jnt]] = 0.0
             self.data.qvel[self.model.jnt_dofadr[drawer_jnt]] = 0.0
+
+        # Park both arms at HOME (qpos and targets) before any physics: the arm's
+        # raw zero pose extends horizontally over the table edge and must be avoided.
+        for arm in ("A", "B"):
+            home = HOME_JOINTS[arm]
+            for i, suffix in enumerate(
+                ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
+            ):
+                jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{arm}.{suffix}")
+                adr = self.model.jnt_qposadr[jid]
+                self.data.qpos[adr] = home[i]
+                act_id = mujoco.mj_name2id(
+                    self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, f"{arm}.{suffix}"
+                )
+                self.data.ctrl[act_id] = home[i]
+            grip_jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"{arm}.gripper")
+            grip_ctrl = self._aperture_to_ctrl(arm, home[5])
+            self.data.qpos[self.model.jnt_qposadr[grip_jid]] = grip_ctrl
+            grip_act = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, f"{arm}.gripper")
+            self.data.ctrl[grip_act] = grip_ctrl
 
         mujoco.mj_forward(self.model, self.data)
         self.settle(0.5)
@@ -343,8 +279,7 @@ class Scene:
         return calc_fill_fraction(self.model, self.data, container)
 
     def settle(self, seconds: float) -> None:
-        """Advance physics with zero arm control targets for specified seconds."""
-        self.data.ctrl[:ACTION_DIM] = 0.0
+        """Advance physics holding the current control targets so free objects come to rest."""
         num_steps = max(1, round(seconds * PHYSICS_HZ))
         for _ in range(num_steps):
             mujoco.mj_step(self.model, self.data)

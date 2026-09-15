@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+
 import mujoco
 import numpy as np
 
 from dinner_table.config import DinnerTableError
-from dinner_table.contracts.geometry import TABLE_TOP_HEIGHT
+from dinner_table.contracts.geometry import CABINET_X, CABINET_Y, TABLE_TOP_HEIGHT
 
 logger = logging.getLogger(__name__)
 
-DRAWER_TRAY_Z = 0.31
-UTENSIL_XY_JITTER_M = 0.03
+DRAWER_TRAY_Z = 0.387  # drawer floor top (TABLE_TOP_HEIGHT + 0.019) + capsule radius
+UTENSIL_XY_JITTER_M = 0.01
 
 
 class SceneObjectError(DinnerTableError):
@@ -57,72 +58,75 @@ class ObjectSpec:
 OBJECT_CATALOG: dict[str, ObjectSpec] = {
     "plate": ObjectSpec(
         physics=("cylinder", (0.09, 0.012, 0.0)),
-        spawn_anchor=(0.10, 0.05, TABLE_TOP_HEIGHT + 0.012),
+        spawn_anchor=(-0.05, -0.20, TABLE_TOP_HEIGHT + 0.012),
         spawn_yaw_rad=0.0,
-        mass_kg=0.25,
+        mass_kg=0.065,
         friction=(0.8, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="rim",
     ),
     "mug": ObjectSpec(
         physics=("cylinder", (0.04, 0.04, 0.0)),
-        spawn_anchor=(-0.10, 0.05, TABLE_TOP_HEIGHT + 0.04),
+        spawn_anchor=(0.250, -0.065, TABLE_TOP_HEIGHT + 0.04),
         spawn_yaw_rad=0.0,
-        mass_kg=0.30,
+        mass_kg=0.045,
         friction=(0.9, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="handle",
     ),
     "bottle": ObjectSpec(
-        physics=("cylinder", (0.035, 0.10, 0.0)),
-        spawn_anchor=(0.0, -0.12, TABLE_TOP_HEIGHT + 0.10),
+        physics=("cylinder", (0.03, 0.07, 0.0)),
+        spawn_anchor=(0.09, -0.16, TABLE_TOP_HEIGHT + 0.07),
         spawn_yaw_rad=0.0,
-        mass_kg=0.60,
+        mass_kg=0.080,
         friction=(0.9, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="neck",
     ),
+    # Utensils are real-cutlery-length capsules lying along Y (handle toward the
+    # arms) in four columns on the drawer floor, all within arm A's reach once
+    # the drawer has slid open.
     "spoon_1": ObjectSpec(
-        physics=("capsule", (0.008, 0.08, 0.0)),
-        spawn_anchor=(0.08, 0.55, DRAWER_TRAY_Z),
+        physics=("capsule", (0.008, 0.055, 0.0)),
+        spawn_anchor=(-0.20, CABINET_Y, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
-        mass_kg=0.04,
+        mass_kg=0.014,
         friction=(0.5, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="mid_handle",
     ),
     "spoon_2": ObjectSpec(
-        physics=("capsule", (0.008, 0.08, 0.0)),
-        spawn_anchor=(0.12, 0.55, DRAWER_TRAY_Z),
+        physics=("capsule", (0.008, 0.055, 0.0)),
+        spawn_anchor=(-0.14, CABINET_Y, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
-        mass_kg=0.04,
+        mass_kg=0.014,
         friction=(0.5, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="mid_handle",
     ),
     "fork_1": ObjectSpec(
-        physics=("capsule", (0.007, 0.085, 0.0)),
-        spawn_anchor=(-0.08, 0.55, DRAWER_TRAY_Z),
+        physics=("capsule", (0.007, 0.055, 0.0)),
+        spawn_anchor=(-0.32, CABINET_Y, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
-        mass_kg=0.05,
+        mass_kg=0.012,
         friction=(0.5, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="mid_handle",
     ),
     "fork_2": ObjectSpec(
-        physics=("capsule", (0.007, 0.085, 0.0)),
-        spawn_anchor=(-0.12, 0.55, DRAWER_TRAY_Z),
+        physics=("capsule", (0.007, 0.055, 0.0)),
+        spawn_anchor=(-0.26, CABINET_Y, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
-        mass_kg=0.05,
+        mass_kg=0.012,
         friction=(0.5, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="mid_handle",
     ),
     "drawer_top": ObjectSpec(
-        physics=("box", (0.24, 0.07, 0.05)),
-        spawn_anchor=(0.0, 0.60, TABLE_TOP_HEIGHT + 0.19),
+        physics=("box", (0.108, 0.072, 0.02)),
+        spawn_anchor=(CABINET_X, CABINET_Y, TABLE_TOP_HEIGHT),
         spawn_yaw_rad=0.0,
-        mass_kg=1.2,
+        mass_kg=0.18,
         friction=(1.0, 0.005, 0.0001),
         visual_mesh=None,
         grasp_class="handle",
@@ -135,6 +139,21 @@ MIN_PAIRWISE_DISTANCES = {
     ("plate", "bottle"): 0.130,
     ("mug", "bottle"): 0.085,
 }
+
+# Horizontal furniture footprints (x_min, x_max, y_min, y_max) that free objects
+# may never spawn inside: the cutlery caddy body (walls, floor, roof), expanded by
+# the spawn jitter plus a small guard. Deep interpenetration with the caddy is the
+# one spawn defect that ejects objects violently; resting against the low arm pads
+# is a benign contact and is not rejected.
+FURNITURE_FOOTPRINTS = ((CABINET_X - 0.21, CABINET_X + 0.21, CABINET_Y - 0.13, CABINET_Y + 0.10),)
+
+
+def _inside_furniture(xy: np.ndarray) -> bool:
+    """True if a horizontal position falls inside any furniture footprint."""
+    for x_min, x_max, y_min, y_max in FURNITURE_FOOTPRINTS:
+        if x_min <= xy[0] <= x_max and y_min <= xy[1] <= y_max:
+            return True
+    return False
 
 
 def sample_spawns(
@@ -176,7 +195,17 @@ def sample_spawns(
                 if dist_2d < min_dist:
                     has_overlap = True
                     break
-        if not has_overlap:
+        # Table objects must clear the caddy; the utensils live inside it by
+        # design, so only plate/mug/bottle (and any future tabletop object)
+        # are checked against the furniture footprints.
+        table_objects = (
+            name
+            for name in spawns
+            if name != "drawer_top" and not name.startswith(("spoon", "fork"))
+        )
+        if not has_overlap and not any(
+            _inside_furniture(spawns[name][0][:2]) for name in table_objects
+        ):
             return spawns
 
     return spawns
@@ -199,13 +228,19 @@ def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarr
         "sphere": mujoco.mjtGeom.mjGEOM_SPHERE,
     }
     mjt_type = geom_type_map[geom_type_str]
+    # Soft contacts (reference-tuned): catalog masses run 4-80 g, and the scene
+    # default solref 0.005 is stiff enough to go numerically unstable there.
+    solref = np.array([0.012, 1.0], dtype=np.float64)
     if geom_type_str == "capsule":
+        # Utensils lie along the drawer's long axis (+Y), handles toward the arms.
         body.add_geom(
             type=mjt_type,
             size=geom_size,
             mass=obj_spec.mass_kg,
             friction=obj_spec.friction,
             quat=np.array([0.7071068, 0.7071068, 0.0, 0.0], dtype=np.float64),
+            solref=solref,
+            condim=4,
         )
     else:
         body.add_geom(
@@ -213,6 +248,8 @@ def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarr
             size=geom_size,
             mass=obj_spec.mass_kg,
             friction=obj_spec.friction,
+            solref=solref,
+            condim=4,
         )
     if obj_spec.visual_mesh is not None:
         mesh = spec.add_mesh(file=obj_spec.visual_mesh)

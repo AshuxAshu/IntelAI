@@ -151,18 +151,18 @@ class TestProtocols:
 class TestHappyPath:
     def test_pick_then_place_completes(self):
         world = FakeWorld()
-        world.set("plate", 0.2, 0.0)
+        world.set("plate", -0.2, 0.0)
         ex, _ = make_executor(world)
         ex.adopt_graph(_graph(_pick(1, "A", "plate"), _place(2, "A", "plate", "placemat_1")))
         drive(ex, world, 1)
         assert ex.state()["mode"] == "running"
-        world.set("plate", 0.2, 0.0, held_by="A")
+        world.set("plate", -0.2, 0.0, held_by="A")
         drive(ex, world, 25)
         assert ex.state()["postcondition"] == "pass"
         assert ex.state()["group_index"] == 1
         drive(ex, world, 1)
         assert ex.state()["mode"] == "running"
-        world.set("plate", 0.22, 0.10, held_by=None)
+        world.set("plate", -0.06, -0.095, held_by=None)
         drive(ex, world, 25)
         assert ex.done()
         assert ex.state()["terminal_reason"] == "completed"
@@ -181,7 +181,7 @@ class TestHappyPath:
 class TestRecoveryMatrix:
     def test_missed_grasp_retries_then_succeeds(self):
         world = FakeWorld()
-        world.set("plate", 0.2, 0.0)
+        world.set("plate", -0.2, 0.0)
         ex, _ = make_executor(world)
         ex.adopt_graph(_graph(_pick(1, "A", "plate")))
         drive(ex, world, 1)
@@ -191,37 +191,37 @@ class TestRecoveryMatrix:
         assert state["recovered"] == "missed_grasp"
         assert state["retries_left"][1] == MAX_STEP_RETRIES - 1
         assert state["postcondition"].startswith("fail:")
-        world.set("plate", 0.2, 0.0, held_by="A")
+        world.set("plate", -0.2, 0.0, held_by="A")
         drive(ex, world, 25)
         assert ex.done()
         assert ex.state()["terminal_reason"] == "completed"
 
     def test_dropped_rolls_back_to_pick(self):
         world = FakeWorld()
-        world.set("plate", 0.2, 0.0)
+        world.set("plate", -0.2, 0.0)
         ex, _ = make_executor(world)
         ex.adopt_graph(_graph(_pick(1, "A", "plate"), _place(2, "A", "plate", "placemat_1")))
         drive(ex, world, 1)
-        world.set("plate", 0.2, 0.0, held_by="A")
+        world.set("plate", -0.2, 0.0, held_by="A")
         drive(ex, world, 25)
         drive(ex, world, 1)  # place boundary -> running
-        world.set("plate", 0.2, 0.0, held_by=None)  # dropped mid-place, far from goal
+        world.set("plate", -0.2, 0.0, held_by=None)  # dropped mid-place, far from goal
         drive(ex, world, 25)  # poll: misplaced -> dropped -> rollback
         state = ex.state()
         assert state["recovered"] == "dropped"
         assert state["group_index"] == 0  # rolled back to the pick group
         drive(ex, world, 1)  # pick boundary again
-        world.set("plate", 0.2, 0.0, held_by="A")
+        world.set("plate", -0.2, 0.0, held_by="A")
         drive(ex, world, 25)
         drive(ex, world, 1)  # place boundary
-        world.set("plate", 0.22, 0.10, held_by=None)
+        world.set("plate", -0.06, -0.095, held_by=None)
         drive(ex, world, 25)
         assert ex.done()
         assert ex.state()["terminal_reason"] == "completed"
 
     def test_object_moved_boundary_replans(self):
         world = FakeWorld()
-        world.set("plate", 0.2, 0.0, held_by="B")
+        world.set("plate", -0.2, 0.0, held_by="B")
         replacement = _graph(_pick(1, "A", "mug"), instruction="pick the mug instead")
         ex, vlm = make_executor(world, graphs=[replacement])
         ex.adopt_graph(_graph(_pick(1, "A", "plate")))
@@ -232,9 +232,9 @@ class TestRecoveryMatrix:
         assert state["replan_depth"] == 1
         assert vlm.parse_calls == 1
         drive(ex, world, 1)  # replan result adopted -> boundary
-        world.set("mug", -0.1, 0.1)
+        world.set("mug", 0.0, -0.22)
         drive(ex, world, 1)  # mug pick boundary -> running
-        world.set("mug", -0.1, 0.1, held_by="A")
+        world.set("mug", 0.0, -0.22, held_by="A")
         drive(ex, world, 25)
         assert ex.done()
         assert ex.state()["terminal_reason"] == "completed"
@@ -262,7 +262,7 @@ class TestRecoveryMatrix:
 
     def test_fumble_retracts_then_re_picks(self):
         world = FakeWorld()
-        world.set("bottle", 0.0, 0.0)
+        world.set("bottle", 0.0, -0.22)
         ex, _ = make_executor(world)
         ex.adopt_graph(
             _graph(
@@ -271,10 +271,10 @@ class TestRecoveryMatrix:
             )
         )
         drive(ex, world, 1)
-        world.set("bottle", 0.0, 0.0, held_by="B")
+        world.set("bottle", 0.0, -0.22, held_by="B")
         drive(ex, world, 25)  # pick passes
         drive(ex, world, 1)  # handoff boundary -> running
-        world.set("bottle", 0.0, 0.0, held_by=None)  # fumbled mid-transfer
+        world.set("bottle", 0.0, -0.22, held_by=None)  # fumbled mid-transfer
         drive(ex, world, 25)  # poll: held by neither -> fumble
         state = ex.state()
         assert state["recovered"] == "fumble"
@@ -282,18 +282,18 @@ class TestRecoveryMatrix:
         drive(ex, world, 25)  # retract pause -> rollback to pick
         assert ex.state()["group_index"] == 0
         drive(ex, world, 1)  # pick boundary
-        world.set("bottle", 0.0, 0.0, held_by="B")
+        world.set("bottle", 0.0, -0.22, held_by="B")
         drive(ex, world, 25)
         drive(ex, world, 1)  # handoff boundary
-        world.set("bottle", 0.0, 0.0, held_by="A")
+        world.set("bottle", 0.0, -0.22, held_by="A")
         drive(ex, world, 25)
         assert ex.done()
         assert ex.state()["terminal_reason"] == "completed"
 
     def test_spilled_repours_after_vlm_boundary_check(self):
         world = FakeWorld()
-        world.set("bottle", 0.1, -0.1)
-        world.set("mug", -0.1, 0.1)
+        world.set("bottle", -0.14, -0.10)
+        world.set("mug", 0.0, -0.22)
         ex, vlm = make_executor(world)
         ex.adopt_graph(
             _graph(
@@ -312,10 +312,10 @@ class TestRecoveryMatrix:
             )
         )
         drive(ex, world, 1)
-        world.set("bottle", 0.1, -0.1, held_by="A")
+        world.set("bottle", -0.14, -0.10, held_by="A")
         drive(ex, world, 25)
         drive(ex, world, 1)
-        world.set("mug", -0.1, 0.1, held_by="B")
+        world.set("mug", 0.0, -0.22, held_by="B")
         drive(ex, world, 25)
         drive(ex, world, 1)  # hold+pour boundary -> running
         drive(ex, world, 90)  # pour duration elapses; verification pending
@@ -334,7 +334,7 @@ class TestRecoveryMatrix:
 class TestAborts:
     def test_replan_depth_exceeded_aborts(self):
         world = FakeWorld()
-        world.set("plate", 0.2, 0.0, held_by="B")
+        world.set("plate", -0.2, 0.0, held_by="B")
         failing = _graph(_pick(1, "A", "plate"))
         ex, vlm = make_executor(world, graphs=[failing, failing, failing, failing])
         ex.adopt_graph(_graph(_pick(1, "A", "plate")))
@@ -348,7 +348,7 @@ class TestAborts:
 
     def test_parse_failure_aborts_after_resubmit(self):
         world = FakeWorld()
-        world.set("plate", 0.2, 0.0, held_by="B")
+        world.set("plate", -0.2, 0.0, held_by="B")
         ex, vlm = make_executor(world, graphs=[])
         ex.adopt_graph(_graph(_pick(1, "A", "plate")))
         with pytest.raises(TaskAborted) as excinfo:
@@ -380,7 +380,7 @@ class TestGate:
 
     def test_single_arm_skill_holds_idle_arm(self):
         world = FakeWorld()
-        world.set("plate", 0.2, 0.0)
+        world.set("plate", -0.2, 0.0)
         ex, _ = make_executor(world)
         ex.adopt_graph(_graph(_pick(1, "A", "plate")))
         drive(ex, world, 1)  # running, arm A active
@@ -397,18 +397,18 @@ class TestGate:
 class TestConditioning:
     def test_running_pick_uses_tracker_goal(self):
         world = FakeWorld()
-        world.set("plate", 0.2, 0.0)
+        world.set("plate", -0.2, 0.0)
         ex, _ = make_executor(world)
         ex.adopt_graph(_graph(_pick(1, "A", "plate")))
         drive(ex, world, 1)
         skill, arm, obj, goal = ex.conditioning()
         assert (skill, arm, obj) == ("pick", "A", "plate")
-        np.testing.assert_allclose(goal, [0.2, 0.0, TABLE_TOP_HEIGHT])
+        np.testing.assert_allclose(goal, [-0.2, 0.0, TABLE_TOP_HEIGHT])
 
     def test_relative_place_resolves_anchor_goal(self):
         world = FakeWorld()
         world.set("fork_1", -0.1, 0.0)
-        world.set("plate", 0.2, 0.0)  # anchor for the relative target
+        world.set("plate", -0.2, 0.0)  # anchor for the relative target
         ex, _ = make_executor(world)
         ex.adopt_graph(
             _graph(
@@ -428,7 +428,7 @@ class TestConditioning:
         drive(ex, world, 1)  # place boundary -> running
         skill, arm, obj, goal = ex.conditioning()
         assert (skill, arm, obj) == ("place", "A", "fork_1")
-        np.testing.assert_allclose(goal, [0.34, 0.0, TABLE_TOP_HEIGHT])  # beside: +0.14 x
+        np.testing.assert_allclose(goal, [-0.34, 0.0, TABLE_TOP_HEIGHT])  # beside: -0.14 x from A-side plate
 
     def test_unresolvable_goal_falls_back_to_home(self):
         world = FakeWorld()

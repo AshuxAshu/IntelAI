@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dinner_table.contracts.geometry import HOME_JOINTS, TABLE_TOP_HEIGHT
+from dinner_table.contracts.geometry import HOME_JOINTS, PLACEMATS, TABLE_TOP_HEIGHT
 from dinner_table.executor.preconditions import (
     WorldState,
     check_postcondition,
@@ -38,18 +38,18 @@ def _world(
 
 
 ZONE_CASES = [
-    ((0.0, 0.0), "shared"),
-    ((0.14, -0.14), "shared"),
-    ((-0.1, 0.05), "shared"),
-    ((0.1, 0.2), "shared"),  # A/B footprint overlap
-    ((0.16, 0.0), "A"),
-    ((0.4, 0.24), "A"),
-    ((0.45, 0.0), "A"),  # inclusive x_max boundary
-    ((-0.16, 0.0), "B"),
-    ((-0.44, -0.2), "B"),
+    ((0.0, -0.22), "shared"),
+    ((0.04, -0.18), "shared"),
+    ((-0.02, -0.20), "shared"),
+    ((-0.10, -0.10), "A"),
+    ((-0.44, -0.2), "A"),
+    ((-0.48, 0.0), "A"),  # inclusive x_min boundary
+    ((0.10, -0.10), "B"),
+    ((0.44, -0.2), "B"),
+    ((0.48, 0.0), "B"),  # inclusive x_max boundary
     ((0.5, 0.0), "out"),
     ((0.0, 0.3), "out"),
-    ((0.0, 0.51), "out"),  # drawer region
+    ((-0.28, 0.11), "out"),  # cabinet region
 ]
 
 
@@ -93,7 +93,7 @@ class TestReassignment:
 
     def test_object_in_other_zone_swaps_arm(self):
         graph = self._pick_place_graph("B", "placemat_1")
-        poses = {"plate": _pose("plate", 0.30, 0.0)}
+        poses = {"plate": _pose("plate", -0.30, 0.0)}
         groups, log = group_steps(graph, poses)
         assert groups[0][0].arm == "A"
         assert groups[1][0].arm == "A"  # place follows the reassigned pick's holder
@@ -104,7 +104,7 @@ class TestReassignment:
 
     def test_object_in_shared_zone_unchanged(self):
         graph = self._pick_place_graph("B", "placemat_2")  # B-side target, B arm: consistent
-        poses = {"plate": _pose("plate", 0.0, 0.0)}
+        poses = {"plate": _pose("plate", 0.0, -0.22)}
         groups, log = group_steps(graph, poses)
         assert all(group[0].arm == "B" for group in groups)
         assert log == []
@@ -114,7 +114,7 @@ class TestReassignment:
         # must NOT swap to A (arm B holds the plate) - the chain wins and the
         # mismatch surfaces as a warning line instead.
         graph = self._pick_place_graph("B", "placemat_1")
-        poses = {"plate": _pose("plate", 0.0, 0.0)}
+        poses = {"plate": _pose("plate", 0.0, -0.22)}
         groups, log = group_steps(graph, poses)
         assert all(group[0].arm == "B" for group in groups)
         assert log == ["step 2: placement goal in A unreachable by arm B - left for recovery"]
@@ -128,7 +128,7 @@ class TestReassignment:
                 Step(id=2, skill="handoff", arm="B", object="bottle", target="hand_of_A"),
             ],
         )
-        poses = {"bottle": _pose("bottle", 0.30, 0.05)}
+        poses = {"bottle": _pose("bottle", -0.30, 0.0)}
         groups, log = group_steps(graph, poses)
         assert groups[0][0].arm == "A"  # pick reassigned by object position
         assert groups[1][0].arm == "A"  # handoff source follows the holder
@@ -157,8 +157,8 @@ class TestReassignment:
             ],
         )
         poses = {
-            "fork_1": _pose("fork_1", -0.30, 0.0),
-            "plate": _pose("plate", 0.30, 0.0),
+            "fork_1": _pose("fork_1", 0.30, 0.0),
+            "plate": _pose("plate", -0.30, 0.0),
         }
         groups, log = group_steps(graph, poses)
         assert all(group[0].arm == "B" for group in groups)
@@ -181,8 +181,8 @@ class TestReassignment:
             ],
         )
         poses = {
-            "fork_1": _pose("fork_1", -0.10, 0.0),
-            "plate": _pose("plate", 0.0, 0.0),  # anchor shared -> goal (0.14, 0) shared
+            "fork_1": _pose("fork_1", 0.10, 0.0),
+            "plate": _pose("plate", 0.0, -0.22),  # anchor shared -> goal (0.14, -0.22) in B
         }
         groups, log = group_steps(graph, poses)
         assert all(group[0].arm == "B" for group in groups)
@@ -214,7 +214,7 @@ class TestParallelGrouping:
                 ),
             ],
         )
-        poses = {"mug": _pose("mug", -0.2, 0.0)}  # mug in B's zone: no reassignment
+        poses = {"mug": _pose("mug", 0.2, 0.0)}  # mug in B's zone: no reassignment
         groups, log = group_steps(graph, poses)
         assert [[step.id for step in group] for group in groups] == [[1], [2, 3]]
         assert log == []
@@ -312,21 +312,21 @@ class TestPostconditions:
 
     def test_place_pass(self):
         step = Step(id=1, skill="place", arm="A", object="plate", target="placemat_1")
-        goal = np.array([0.22, 0.10, TABLE_TOP_HEIGHT])
-        world = _world({"plate": _pose("plate", 0.22, 0.10)})
+        goal = np.array([*PLACEMATS["placemat_1"][:2], TABLE_TOP_HEIGHT])
+        world = _world({"plate": _pose("plate", *PLACEMATS["placemat_1"][:2])})
         assert check_postcondition(step, world, goal=goal).ok
 
     def test_place_fail_too_far(self):
         step = Step(id=1, skill="place", arm="A", object="plate", target="placemat_1")
-        goal = np.array([0.22, 0.10, TABLE_TOP_HEIGHT])
-        world = _world({"plate": _pose("plate", 0.27, 0.10)})  # 5 cm off
+        goal = np.array([*PLACEMATS["placemat_1"][:2], TABLE_TOP_HEIGHT])
+        world = _world({"plate": _pose("plate", PLACEMATS["placemat_1"][0] + 0.05, PLACEMATS["placemat_1"][1])})  # 5 cm off
         report = check_postcondition(step, world, goal=goal)
         assert not report.ok and report.reason
 
     def test_place_fail_still_held(self):
         step = Step(id=1, skill="place", arm="A", object="plate", target="placemat_1")
-        goal = np.array([0.22, 0.10, TABLE_TOP_HEIGHT])
-        world = _world({"plate": _pose("plate", 0.22, 0.10, held_by="A")})
+        goal = np.array([*PLACEMATS["placemat_1"][:2], TABLE_TOP_HEIGHT])
+        world = _world({"plate": _pose("plate", *PLACEMATS["placemat_1"][:2], held_by="A")})
         report = check_postcondition(step, world, goal=goal)
         assert not report.ok and report.reason
 

@@ -71,8 +71,8 @@ def test_utensil_spawns_inside_drawer_footprint() -> None:
         spawns = sample_spawns(rng, dr)
         for name in utensils:
             pos, _ = spawns[name]
-            assert -0.20 <= pos[0] <= 0.20, f"utensil {name} x={pos[0]} outside [-0.20, 0.20]"
-            assert 0.45 <= pos[1] <= 0.60, f"utensil {name} y={pos[1]} outside [0.45, 0.60]"
+            assert -0.34 <= pos[0] <= -0.12, f"utensil {name} x={pos[0]} outside [-0.34, -0.12]"
+            assert 0.09 <= pos[1] <= 0.13, f"utensil {name} y={pos[1]} outside [0.09, 0.13]"
 
 
 def test_instantiate_on_bare_spec_compiles_with_catalog_mass() -> None:

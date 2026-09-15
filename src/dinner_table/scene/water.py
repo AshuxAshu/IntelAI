@@ -15,7 +15,7 @@ PARTICLE_MASS = 0.001
 
 # Maximum cylinder half-heights (m) for visual proxy encoding
 MAX_WATER_HALF_HEIGHT = {
-    "bottle": 0.07,
+    "bottle": 0.055,
     "mug": 0.035,
 }
 
@@ -43,10 +43,8 @@ def attach_water(spec: mujoco.MjSpec, bottle_name: str = "bottle") -> None:
         bottle_body.add_geom(
             name="water_bottle_geom",
             type=mujoco.mjtGeom.mjGEOM_CYLINDER,
-            size=np.array(
-                [0.032, MAX_WATER_HALF_HEIGHT["bottle"], 0.0], dtype=np.float64
-            ),
-            pos=np.array([0.0, 0.0, -0.03], dtype=np.float64),
+            size=np.array([0.027, MAX_WATER_HALF_HEIGHT["bottle"], 0.0], dtype=np.float64),
+            pos=np.array([0.0, 0.0, -0.015], dtype=np.float64),
             rgba=np.array([0.2, 0.5, 0.85, 0.6], dtype=np.float64),
             contype=0,
             conaffinity=0,
@@ -112,9 +110,7 @@ def attach_water(spec: mujoco.MjSpec, bottle_name: str = "bottle") -> None:
                     particle_index += 1
 
 
-def set_fill_fraction(
-    model: mujoco.MjModel, container_name: str, fraction: float
-) -> None:
+def set_fill_fraction(model: mujoco.MjModel, container_name: str, fraction: float) -> None:
     """Set the visual liquid height scale for the specified container from 0.0 to 1.0."""
     if container_name not in MAX_WATER_HALF_HEIGHT:
         raise WaterError(f"unknown container for visual water scale: {container_name}")
@@ -127,9 +123,7 @@ def set_fill_fraction(
     model.geom_size[gid][1] = target_half_h
 
 
-def fill_fraction(
-    model: mujoco.MjModel, data: mujoco.MjData, container_name: str
-) -> float:
+def fill_fraction(model: mujoco.MjModel, data: mujoco.MjData, container_name: str) -> float:
     """Return fraction of water inside the specified container from 0.0 to 1.0."""
     if FALLBACK_VISUAL:
         if container_name not in MAX_WATER_HALF_HEIGHT:

@@ -1,15 +1,30 @@
 <mujocoinclude>
-  <!-- Prismatic drawer cabinet with utensil slots and slide joint -->
-  <body name="cabinet" pos="0 0.62 0.18">
-    <geom name="cabinet_shell" type="box" size="0.28 0.09 0.18" class="furniture" contype="0" conaffinity="0"/>
-    <body name="drawer_top" pos="0 -0.02 0.07">
-      <!-- Prismatic drawer: slides toward table along -Y; frictionloss and damping are DR axes -->
-      <joint name="drawer_slide" type="slide" axis="0 -1 0" range="0 0.24"
-             damping="2" frictionloss="4" actuatorfrcrange="-25 25"/>
-      <geom name="drawer_box" type="box" size="0.24 0.07 0.05" class="furniture"/>
-      <site name="drawer_handle" pos="0 -0.075 0" size="0.005"/>
-      <site name="tray_slot_fork" pos="-0.10 -0.02 0.06" size="0.005"/>
-      <site name="tray_slot_spoon" pos="0.10 -0.02 0.06" size="0.005"/>
+  <!-- Tabletop cutlery caddy with a prismatic drawer (Amendment 1: moved from the
+       unreachable back edge onto the table at the arm-A side; the drawer slides
+       toward the front-mounted arms along -Y. Cutlery lies along Y on the drawer
+       floor, handles toward the arms.) -->
+  <body name="cabinet" pos="-0.24 0.11 0.36">
+    <geom name="cabinet_side_l" type="box" size="0.006 0.083 0.045" pos="-0.144 0 0.045" class="furniture"/>
+    <geom name="cabinet_side_r" type="box" size="0.006 0.083 0.045" pos="0.144 0 0.045" class="furniture"/>
+    <geom name="cabinet_roof" type="box" size="0.150 0.083 0.006" pos="0 0 0.096" class="furniture"/>
+    <geom name="cabinet_back" type="box" size="0.138 0.005 0.045" pos="0 0.078 0.045" class="furniture"/>
+    <body name="drawer_top" pos="0 0 0">
+      <!-- Prismatic drawer: slides toward the arms along -Y; frictionloss and damping are DR axes -->
+      <joint name="drawer_slide" type="slide" axis="0 -1 0" range="0 0.12"
+             damping="2" frictionloss="0.15" armature="0.01" actuatorfrcrange="-25 25"/>
+      <inertial pos="0 0 0.025" mass="0.18" diaginertia="0.00045 0.0006 0.0009"/>
+      <geom name="drawer_floor" type="box" size="0.130 0.072 0.004" pos="0 0 0.015" class="furniture"/>
+      <geom name="drawer_side_l" type="box" size="0.003 0.072 0.015" pos="-0.130 0 0.034" class="furniture"/>
+      <geom name="drawer_side_r" type="box" size="0.003 0.072 0.015" pos="0.130 0 0.034" class="furniture"/>
+      <geom name="drawer_back" type="box" size="0.130 0.003 0.015" pos="0 0.069 0.034" class="furniture"/>
+      <geom name="drawer_front" type="box" size="0.144 0.005 0.020" pos="0 -0.089 0.030" class="furniture"/>
+      <geom name="drawer_handle_post_l" type="box" size="0.004 0.034 0.004" pos="-0.036 -0.124 0.052" class="furniture"/>
+      <geom name="drawer_handle_post_r" type="box" size="0.004 0.034 0.004" pos="0.036 -0.124 0.052" class="furniture"/>
+      <geom name="drawer_handle_bar" type="capsule" size="0.005 0.036" pos="0 -0.160 0.052"
+            quat="0.7071068 0 0.7071068 0" class="furniture"/>
+      <site name="drawer_handle" pos="0 -0.160 0.052" size="0.005"/>
+      <site name="tray_slot_fork" pos="-0.05 -0.02 0.03" size="0.005"/>
+      <site name="tray_slot_spoon" pos="0.05 -0.02 0.03" size="0.005"/>
     </body>
   </body>
 </mujocoinclude>
