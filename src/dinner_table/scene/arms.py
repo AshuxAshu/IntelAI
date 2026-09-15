@@ -25,7 +25,7 @@ from dinner_table.contracts.geometry import ARM_MOUNTS, ARM_ORIENTATIONS
 ARM_XML_PATH = Path("assets/meshes/so101/official/so101_arm.xml")
 MESH_DIR_REL = "so101/official/assets"  # relative to the scene compiler meshdir
 GRASP_SITE_POS = (0.003, 0.0, -0.092)  # tool point between the finger tips (gripper frame)
-GRASP_SITE_QUAT = (0.0, 0.0, 1.0, 0.0)  # 180 deg about Y: site +Z = gripper -Z (finger direction)
+GRASP_SITE_QUAT = (0.0, 0.0, 1.0, 0.0)  # 180 deg about Y: site +Z = gripper -Z (fingers), site +X = -gripper +X
 
 
 class ArmIntegrationError(DinnerTableError):

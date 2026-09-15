@@ -15,7 +15,7 @@ PARTICLE_MASS = 0.001
 
 # Maximum cylinder half-heights (m) for visual proxy encoding
 MAX_WATER_HALF_HEIGHT = {
-    "bottle": 0.055,
+    "bottle": 0.020,
     "mug": 0.035,
 }
 
@@ -39,12 +39,13 @@ def attach_water(spec: mujoco.MjSpec, bottle_name: str = "bottle") -> None:
         raise WaterError(f"bottle body not found in spec: {bottle_name}")
 
     if FALLBACK_VISUAL:
-        # Visual proxy: translucent blue cylinder filling lower 70% of bottle (half-height 0.07 m)
+        # Visual proxy: translucent blue cylinder in the bottle's lower body
+        # (10 cm bottle: wall 0.007-0.048, water half-height 0.02).
         bottle_body.add_geom(
             name="water_bottle_geom",
             type=mujoco.mjtGeom.mjGEOM_CYLINDER,
-            size=np.array([0.027, MAX_WATER_HALF_HEIGHT["bottle"], 0.0], dtype=np.float64),
-            pos=np.array([0.0, 0.0, -0.015], dtype=np.float64),
+            size=np.array([0.024, MAX_WATER_HALF_HEIGHT["bottle"], 0.0], dtype=np.float64),
+            pos=np.array([0.0, 0.0, 0.027], dtype=np.float64),
             rgba=np.array([0.2, 0.5, 0.85, 0.6], dtype=np.float64),
             contype=0,
             conaffinity=0,
@@ -55,8 +56,8 @@ def attach_water(spec: mujoco.MjSpec, bottle_name: str = "bottle") -> None:
             mug_body.add_geom(
                 name="water_mug_geom",
                 type=mujoco.mjtGeom.mjGEOM_CYLINDER,
-                size=np.array([0.036, 0.0001, 0.0], dtype=np.float64),
-                pos=np.array([0.0, 0.0, -0.01], dtype=np.float64),
+                size=np.array([0.021, 0.0001, 0.0], dtype=np.float64),
+                pos=np.array([0.0, 0.0, 0.032], dtype=np.float64),
                 rgba=np.array([0.2, 0.5, 0.85, 0.6], dtype=np.float64),
                 contype=0,
                 conaffinity=0,

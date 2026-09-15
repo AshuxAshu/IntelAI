@@ -71,7 +71,7 @@ def test_utensil_spawns_inside_drawer_footprint() -> None:
         spawns = sample_spawns(rng, dr)
         for name in utensils:
             pos, _ = spawns[name]
-            assert -0.34 <= pos[0] <= -0.12, f"utensil {name} x={pos[0]} outside [-0.34, -0.12]"
+            assert -0.30 <= pos[0] <= -0.14, f"utensil {name} x={pos[0]} outside [-0.30, -0.14]"
             assert 0.09 <= pos[1] <= 0.13, f"utensil {name} y={pos[1]} outside [0.09, 0.13]"
 
 

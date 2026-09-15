@@ -4,6 +4,16 @@ A 5-DOF arm cannot satisfy a full 6-D pose, so position rows are weighted
 above orientation rows (the approach vector) and gripper yaw is planned
 separately via wrist roll by the skill layer. Failure is explicit —
 ``IKUnreachable`` — never a garbage solution.
+
+Two solve paths:
+
+- **Approach-only** (``target_lateral=None``): cross-product orientation error
+  with an orientation-weight continuation ramp — the A5 solver, bit-identical.
+- **Approach + lateral axis** (``target_lateral`` given): the reference
+  teacher's axis-space formulation — errors ``0.08 * (target_axis -
+  current_axis)`` with axis-space Jacobian rows. The vector-difference error
+  has no +/- basin ambiguity (a cross product vanishes at the mirrored
+  solution), which matters because the gripper jaws are symmetric.
 """
 
 from __future__ import annotations
@@ -54,8 +64,7 @@ class IKUnreachable(Exception):
 
 def _errors(data, site: str, target_pos: np.ndarray, target_approach: np.ndarray):
     pos, rot = site_pose(data, site)
-    err = np.concatenate([target_pos - pos, np.cross(rot[:, 2], target_approach)])
-    return err
+    return np.concatenate([target_pos - pos, np.cross(rot[:, 2], target_approach)])
 
 
 def _dls_phase(
@@ -74,15 +83,16 @@ def _dls_phase(
 ) -> tuple[np.ndarray, float, float]:
     """Run weighted damped least squares at one orientation weight.
 
-    Returns (q, pos_err, ang_err). The weighted step is
+    Returns (q, pos_err, ang_err) where ang_err is the worst of the approach
+    and lateral angular errors. The weighted step is
     ``dq = J^T W (W J J^T W^T + damping^2 I)^-1 W e`` — the least-squares
     solution of ``W J dq = W e``.
     """
     lower, upper = joint_limits(model, arm)
     w = np.diag([1.0, 1.0, 1.0, orient_weight, orient_weight, orient_weight])
-    eye6 = np.eye(6, dtype=np.float64)
-    # The orientation error is a cross product, so its norm is sin(angle);
-    # comparing against sin(ang_tol) guarantees the true angle is within tolerance.
+    eye_n = np.eye(6, dtype=np.float64)
+    # The orientation errors are cross products, so their norms are sin(angle);
+    # comparing against sin(ang_tol) guarantees the true angles are in tolerance.
     ang_err_tol = np.sin(ang_tol)
     pos_err = ang_err = np.inf
     for _ in range(iters):
@@ -96,7 +106,7 @@ def _dls_phase(
         if orient_weight == 0.0 and pos_err < pos_tol:
             break  # position phase done; orientation handled by later phases
         jac = site_jacobian(model, data, site)
-        dq = jac.T @ w @ np.linalg.solve(w @ jac @ jac.T @ w.T + damping**2 * eye6, w @ err)
+        dq = jac.T @ w @ np.linalg.solve(w @ jac @ jac.T @ w.T + damping**2 * eye_n, w @ err)
         step = float(np.max(np.abs(dq)))
         if step > STEP_CAP:
             dq *= STEP_CAP / step
@@ -119,7 +129,7 @@ def _iterate(
 ) -> np.ndarray | None:
     """Solve from one seed via the orientation-weight continuation; None on failure."""
     q = np.asarray(q0, dtype=np.float64).copy()
-    for i, orient_weight in enumerate(ORIENT_WEIGHT_RAMP):
+    for orient_weight in ORIENT_WEIGHT_RAMP:
         budget = iters if orient_weight in (0.0, FINAL_ORIENT_WEIGHT) else 40
         q, pos_err, ang_err = _dls_phase(
             model,
@@ -142,6 +152,78 @@ def _iterate(
     return None
 
 
+def _skew(v: np.ndarray) -> np.ndarray:
+    """Skew-symmetric matrix so that skew(v) @ w == v x w."""
+    return np.array(
+        [[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]], dtype=np.float64
+    )
+
+
+AXIS_SCALE = 0.08  # reference-tuned orientation-to-position error scale
+AXIS_DAMPING2 = 1e-5
+AXIS_STEP_CAP = 0.06
+AXIS_ITERS = 180
+AXIS_MARGIN = 0.004  # rad of joint-range margin, as in the reference solver
+
+
+def _axis_space_phase(
+    model,
+    data,
+    site: str,
+    arm: str,
+    target_pos: np.ndarray,
+    target_approach: np.ndarray,
+    target_lateral: np.ndarray,
+    q: np.ndarray,
+    pos_tol: float,
+    ang_tol: float,
+) -> tuple[np.ndarray, float, float]:
+    """One axis-space solve from seed q (reference formulation).
+
+    Returns (q, pos_err, worst_axis_err) where worst_axis_err is the larger
+    axis misalignment in radians.
+    """
+    lower, upper = joint_limits(model, arm)
+    lower = lower + AXIS_MARGIN
+    upper = upper - AXIS_MARGIN
+    axis_tol = 2.0 * np.sin(ang_tol / 2.0)
+    pos_err = axis_err = np.inf
+    for _ in range(AXIS_ITERS):
+        set_arm_q(data, arm, q)
+        mujoco.mj_forward(model, data)
+        pos, rot = site_pose(data, site)
+        zax, xax = rot[:, 2], rot[:, 0]
+        err = np.concatenate(
+            [
+                target_pos - pos,
+                AXIS_SCALE * (target_approach - zax),
+                AXIS_SCALE * (target_lateral - xax),
+            ]
+        )
+        pos_err = float(np.linalg.norm(err[:3]))
+        axis_err = max(
+            float(np.linalg.norm(err[3:6])), float(np.linalg.norm(err[6:9]))
+        ) / AXIS_SCALE
+        if pos_err < pos_tol and axis_err < axis_tol:
+            break
+        jac = site_jacobian(model, data, site)
+        aug = np.vstack(
+            [
+                jac[:3],
+                -AXIS_SCALE * _skew(zax) @ jac[3:],
+                -AXIS_SCALE * _skew(xax) @ jac[3:],
+            ]
+        )
+        dq = aug.T @ np.linalg.solve(
+            aug @ aug.T + np.eye(9, dtype=np.float64) * AXIS_DAMPING2, err
+        )
+        step = float(np.max(np.abs(dq)))
+        if step > AXIS_STEP_CAP:
+            dq *= AXIS_STEP_CAP / step
+        q = np.clip(q + dq, lower, upper)
+    return q, pos_err, axis_err
+
+
 def solve_ik(
     model,
     data,
@@ -153,15 +235,21 @@ def solve_ik(
     ang_tol: float = ANG_TOL,
     iters: int = MAX_ITERS,
     damping: float = DAMPING,
+    target_lateral=None,
 ) -> np.ndarray:
-    """Solve IK for the arm site to (target_pos, target_approach) starting from q0.
+    """Solve IK for the arm site to (target_pos, target_approach[, target_lateral]).
 
-    Joint limits are clipped every iteration; failure raises ``IKUnreachable``.
+    ``target_lateral`` optionally constrains the site's local X axis direction
+    (the reference teacher's ``x_target``). Joint limits are clipped every
+    iteration; failure raises ``IKUnreachable``.
     """
     arm = arm_of(site)
     target_pos = np.asarray(target_pos, dtype=np.float64)
     target_approach = np.asarray(target_approach, dtype=np.float64)
     target_approach = target_approach / np.linalg.norm(target_approach)
+    if target_lateral is not None:
+        target_lateral = np.asarray(target_lateral, dtype=np.float64)
+        target_lateral = target_lateral / np.linalg.norm(target_lateral)
     lower, upper = joint_limits(model, arm)
 
     q_seed = np.asarray(q0, dtype=np.float64).copy()
@@ -190,27 +278,38 @@ def solve_ik(
         seeds.append(restart_rng.uniform(lower, upper))
 
     for seed in seeds:
-        q = _iterate(
-            model,
-            data,
-            site,
-            arm,
-            target_pos,
-            target_approach,
-            seed,
-            pos_tol,
-            ang_tol,
-            iters,
-            damping,
-        )
-        if q is not None:
-            return q
+        if target_lateral is None:
+            q = _iterate(
+                model,
+                data,
+                site,
+                arm,
+                target_pos,
+                target_approach,
+                seed,
+                pos_tol,
+                ang_tol,
+                iters,
+                damping,
+            )
+            if q is not None:
+                return q
+        else:
+            q, pos_err, axis_err = _axis_space_phase(
+                model, data, site, arm, target_pos, target_approach,
+                target_lateral, seed, pos_tol, ang_tol,
+            )
+            if pos_err < pos_tol and axis_err < 2.0 * np.sin(ang_tol / 2.0):
+                return q
     raise IKUnreachable(site, target_pos)
 
 
-def ik_above(model, data, arm: str, grasp_pose, height: float) -> np.ndarray:
+def ik_above(model, data, arm: str, grasp_pose, height: float, target_lateral=None) -> np.ndarray:
     """IK to the grasp pose offset +height along world +Z, approach axis -Z."""
     grasp_pos = np.asarray(grasp_pose[0], dtype=np.float64)
     target_pos = grasp_pos + np.array([0.0, 0.0, float(height)], dtype=np.float64)
     target_approach = np.array([0.0, 0.0, -1.0], dtype=np.float64)
-    return solve_ik(model, data, f"{arm}.ee", target_pos, target_approach, arm_q(data, arm))
+    return solve_ik(
+        model, data, f"{arm}.ee", target_pos, target_approach, arm_q(data, arm),
+        target_lateral=target_lateral,
+    )

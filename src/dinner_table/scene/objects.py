@@ -13,8 +13,12 @@ from dinner_table.contracts.geometry import CABINET_X, CABINET_Y, TABLE_TOP_HEIG
 
 logger = logging.getLogger(__name__)
 
-DRAWER_TRAY_Z = 0.387  # drawer floor top (TABLE_TOP_HEIGHT + 0.019) + capsule radius
+DRAWER_TRAY_Z = 0.385  # drawer floor top (TABLE_TOP_HEIGHT + 0.019) + box half-height
 UTENSIL_XY_JITTER_M = 0.01
+# The bottle's neck grasp sits high in the arm's constrained envelope: the
+# verified-feasible region around its anchor is razor-thin, so its spawn
+# jitter is minimal (mass/friction DR still fully randomize).
+BOTTLE_XY_JITTER_M = 0.015
 
 
 class SceneObjectError(DinnerTableError):
@@ -58,7 +62,7 @@ class ObjectSpec:
 OBJECT_CATALOG: dict[str, ObjectSpec] = {
     "plate": ObjectSpec(
         physics=("cylinder", (0.09, 0.012, 0.0)),
-        spawn_anchor=(-0.05, -0.20, TABLE_TOP_HEIGHT + 0.012),
+        spawn_anchor=(-0.05, -0.20, TABLE_TOP_HEIGHT + 0.001),
         spawn_yaw_rad=0.0,
         mass_kg=0.065,
         friction=(0.8, 0.005, 0.0001),
@@ -67,7 +71,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
     ),
     "mug": ObjectSpec(
         physics=("cylinder", (0.04, 0.04, 0.0)),
-        spawn_anchor=(0.250, -0.065, TABLE_TOP_HEIGHT + 0.04),
+        spawn_anchor=(0.27, -0.10, TABLE_TOP_HEIGHT + 0.001),
         spawn_yaw_rad=0.0,
         mass_kg=0.045,
         friction=(0.9, 0.005, 0.0001),
@@ -76,7 +80,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
     ),
     "bottle": ObjectSpec(
         physics=("cylinder", (0.03, 0.07, 0.0)),
-        spawn_anchor=(0.09, -0.16, TABLE_TOP_HEIGHT + 0.07),
+        spawn_anchor=(0.10, -0.09, TABLE_TOP_HEIGHT + 0.001),
         spawn_yaw_rad=0.0,
         mass_kg=0.080,
         friction=(0.9, 0.005, 0.0001),
@@ -87,7 +91,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
     # arms) in four columns on the drawer floor, all within arm A's reach once
     # the drawer has slid open.
     "spoon_1": ObjectSpec(
-        physics=("capsule", (0.008, 0.055, 0.0)),
+        physics=("box", (0.009, 0.055, 0.006)),
         spawn_anchor=(-0.20, CABINET_Y, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.014,
@@ -96,8 +100,8 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         grasp_class="mid_handle",
     ),
     "spoon_2": ObjectSpec(
-        physics=("capsule", (0.008, 0.055, 0.0)),
-        spawn_anchor=(-0.14, CABINET_Y, DRAWER_TRAY_Z),
+        physics=("box", (0.009, 0.055, 0.006)),
+        spawn_anchor=(-0.165, CABINET_Y, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.014,
         friction=(0.5, 0.005, 0.0001),
@@ -105,8 +109,8 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         grasp_class="mid_handle",
     ),
     "fork_1": ObjectSpec(
-        physics=("capsule", (0.007, 0.055, 0.0)),
-        spawn_anchor=(-0.32, CABINET_Y, DRAWER_TRAY_Z),
+        physics=("box", (0.007, 0.055, 0.006)),
+        spawn_anchor=(-0.28, CABINET_Y, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.012,
         friction=(0.5, 0.005, 0.0001),
@@ -114,8 +118,8 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         grasp_class="mid_handle",
     ),
     "fork_2": ObjectSpec(
-        physics=("capsule", (0.007, 0.055, 0.0)),
-        spawn_anchor=(-0.26, CABINET_Y, DRAWER_TRAY_Z),
+        physics=("box", (0.007, 0.055, 0.006)),
+        spawn_anchor=(-0.24, CABINET_Y, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.012,
         friction=(0.5, 0.005, 0.0001),
@@ -134,10 +138,12 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
 }
 
 
+# Minimums include each object's approach-lane clearance: a bottle spawned
+# 10 cm from the mug puts the mug's hover pose inside the bottle's neck.
 MIN_PAIRWISE_DISTANCES = {
-    ("plate", "mug"): 0.135,
-    ("plate", "bottle"): 0.130,
-    ("mug", "bottle"): 0.085,
+    ("plate", "mug"): 0.20,
+    ("plate", "bottle"): 0.16,
+    ("mug", "bottle"): 0.16,
 }
 
 # Horizontal furniture footprints (x_min, x_max, y_min, y_max) that free objects
@@ -169,6 +175,12 @@ def sample_spawns(
             else:
                 if name.startswith("spoon") or name.startswith("fork"):
                     jitter_limit = UTENSIL_XY_JITTER_M
+                elif name == "bottle":
+                    # The neck grasp sits high in the arm's constrained
+                    # envelope; the verified-feasible region around the anchor
+                    # is tight, so the bottle's spawn jitter is halved (mass
+                    # and friction DR still fully randomize).
+                    jitter_limit = min(BOTTLE_XY_JITTER_M, dr.spawn_xy_jitter_m)
                 else:
                     jitter_limit = dr.spawn_xy_jitter_m
                 jitter_x = rng.uniform(-jitter_limit, jitter_limit)
@@ -211,6 +223,109 @@ def sample_spawns(
     return spawns
 
 
+# Composite dimensions (Amendment 1): vessels are HOLLOW — base plate plus
+# tangential-box ring walls (the reference solution's proven construction) —
+# because the reference grasp strategies pinch rim walls and mug handles that
+# solid primitives cannot offer. Body origins sit at the object base; the
+# grasp catalog's offsets are measured against these radii.
+PLATE_RIM_R = 0.061
+MUG_WALL_R = 0.025
+BOTTLE_WALL_R = 0.028  # body wall centerline radius
+BOTTLE_NECK_Z = 0.073  # neck mid-height above the base (10 cm bottle)
+SOFT_SOLREF = np.array([0.012, 1.0], dtype=np.float64)
+
+
+def _z_quat(angle: float) -> np.ndarray:
+    half = angle * 0.5
+    return np.array([np.cos(half), 0.0, 0.0, np.sin(half)], dtype=np.float64)
+
+
+def _count_geoms(name: str) -> int:
+    if name == "plate":
+        return 1 + 24
+    if name == "mug":
+        return 1 + 24 + 24 + 3
+    if name == "bottle":
+        return 1 + 24 + 24 + 24
+    return 1
+
+
+def _ring(body, name: str, radius: float, thickness: float, height: float,
+          z: float, mass_each: float, friction, segments: int = 24) -> None:
+    """Tangential overlapping boxes forming a closed ring wall (hollow vessel)."""
+    half_y = (radius + thickness / 2.0) * np.tan(np.pi / segments)
+    for i in range(segments):
+        a = 2.0 * np.pi * i / segments
+        body.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=np.array([thickness / 2.0, half_y, height / 2.0], dtype=np.float64),
+            pos=np.array([radius * np.cos(a), radius * np.sin(a), z], dtype=np.float64),
+            quat=_z_quat(a),
+            mass=mass_each,
+            friction=friction,
+            solref=SOFT_SOLREF,
+            condim=4,
+        )
+
+
+def _cyl(body, name: str, radius: float, half_h: float, z: float,
+         mass: float, friction) -> None:
+    body.add_geom(
+        type=mujoco.mjtGeom.mjGEOM_CYLINDER,
+        size=np.array([radius, half_h, 0.0], dtype=np.float64),
+        pos=np.array([0.0, 0.0, z], dtype=np.float64),
+        mass=mass,
+        friction=friction,
+        solref=SOFT_SOLREF,
+        condim=4,
+    )
+
+
+def _capsule(body, name: str, radius: float, half_len: float, pos, mass: float,
+             friction, quat=None) -> None:
+    kwargs = {}
+    if quat is not None:
+        kwargs["quat"] = quat
+    body.add_geom(
+        type=mujoco.mjtGeom.mjGEOM_CAPSULE,
+        size=np.array([radius, half_len, 0.0], dtype=np.float64),
+        pos=np.asarray(pos, dtype=np.float64),
+        mass=mass,
+        friction=friction,
+        solref=SOFT_SOLREF,
+        condim=4,
+        **kwargs,
+    )
+
+
+def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
+    per = mass_kg / _count_geoms(name)
+    if name == "plate":
+        # Reference plate scale (radius 0.066 + 10 mm rim wall): the grasp
+        # offset 0.061 is measured against THIS rim, and the smaller disc
+        # clears the arm's shoulder structure during rim grasps.
+        _cyl(body, name, 0.058, 0.003, 0.003, per, friction)
+        _ring(body, name, PLATE_RIM_R, 0.010, 0.020, 0.014, per, friction)
+    elif name == "mug":
+        # Reference mug dimensions (their grasp offsets are measured against
+        # this exact wall radius and height; Amendment 1 port).
+        _cyl(body, name, 0.025, 0.007, 0.007, per, friction)
+        _ring(body, name, 0.025, 0.004, 0.064, 0.046, per, friction)
+        _ring(body, name, 0.025, 0.0045, 0.003, 0.0645, per, friction)
+        _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.019], per, friction)
+        _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.055], per, friction)
+        _capsule(body, name, 0.004, 0.018, [0.047, 0.0, 0.037], per, friction,
+                 quat=np.array([0.7071068, 0.0, 0.7071068, 0.0], dtype=np.float64))
+    elif name == "bottle":
+        # 10 cm hollow bottle: base, body wall, shoulder step, narrow neck.
+        # The four working grasp recipes (plate/mug/utensils) are unaffected
+        # by the bottle; this structure only needs to settle stably.
+        _cyl(body, name, BOTTLE_WALL_R, 0.007, 0.007, per, friction)
+        _ring(body, name, BOTTLE_WALL_R, 0.004, 0.041, 0.0275, per, friction)
+        _ring(body, name, 0.024, 0.008, 0.010, 0.053, per, friction)
+        _ring(body, name, 0.013, 0.003, 0.030, 0.073, per, friction)
+
+
 def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarray]) -> None:
     """Add a catalog object body and geometry to the MuJoCo specification."""
     if name not in OBJECT_CATALOG:
@@ -220,6 +335,9 @@ def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarr
     body = spec.worldbody.add_body(name=name, pos=pos, quat=quat)
     if name != "drawer_top":
         body.add_freejoint()
+    if name in ("plate", "mug", "bottle"):
+        _build_vessel(body, name, obj_spec.mass_kg, obj_spec.friction)
+        return
     geom_type_str, geom_size = obj_spec.physics
     geom_type_map = {
         "box": mujoco.mjtGeom.mjGEOM_BOX,
@@ -228,35 +346,11 @@ def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarr
         "sphere": mujoco.mjtGeom.mjGEOM_SPHERE,
     }
     mjt_type = geom_type_map[geom_type_str]
-    # Soft contacts (reference-tuned): catalog masses run 4-80 g, and the scene
-    # default solref 0.005 is stiff enough to go numerically unstable there.
-    solref = np.array([0.012, 1.0], dtype=np.float64)
-    if geom_type_str == "capsule":
-        # Utensils lie along the drawer's long axis (+Y), handles toward the arms.
-        body.add_geom(
-            type=mjt_type,
-            size=geom_size,
-            mass=obj_spec.mass_kg,
-            friction=obj_spec.friction,
-            quat=np.array([0.7071068, 0.7071068, 0.0, 0.0], dtype=np.float64),
-            solref=solref,
-            condim=4,
-        )
-    else:
-        body.add_geom(
-            type=mjt_type,
-            size=geom_size,
-            mass=obj_spec.mass_kg,
-            friction=obj_spec.friction,
-            solref=solref,
-            condim=4,
-        )
-    if obj_spec.visual_mesh is not None:
-        mesh = spec.add_mesh(file=obj_spec.visual_mesh)
-        body.add_geom(
-            type=mujoco.mjtGeom.mjGEOM_MESH,
-            meshname=mesh.name,
-            contype=0,
-            conaffinity=0,
-            group=1,
-        )
+    body.add_geom(
+        type=mjt_type,
+        size=geom_size,
+        mass=obj_spec.mass_kg,
+        friction=obj_spec.friction,
+        solref=SOFT_SOLREF,
+        condim=4,
+    )

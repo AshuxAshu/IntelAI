@@ -3,7 +3,7 @@ name = "dinner_table"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "mujoco==3.2.*",
+  "mujoco==3.2.7",
   "numpy>=1.26",
   "pydantic==2.*",
   "pillow>=10",

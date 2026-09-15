@@ -62,7 +62,7 @@ PLACEMATS = {
     "placemat_1": (-0.06, -0.095, TABLE_TOP_HEIGHT),  # plate setting (arm A side)
     "placemat_2": (0.265, -0.065, TABLE_TOP_HEIGHT),  # mug setting (arm B side)
 }
-DRAWER_HANDLE = (CABINET_X, CABINET_Y - 0.16, TABLE_TOP_HEIGHT + 0.052)
+DRAWER_HANDLE = (CABINET_X, CABINET_Y - 0.18, TABLE_TOP_HEIGHT + 0.0575)
 HOME_JOINTS = {
     "A": (0.0, -0.70, 0.80, 0.20, 0.0, 0.43),
     "B": (0.0, -0.70, 0.80, 0.20, 0.0, 0.43),
