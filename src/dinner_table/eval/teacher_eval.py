@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_REPORT = Path("artifacts/eval/teacher_report.json")
 FIRST_ATTEMPT_MIN = 0.95
 WITH_RETRY_MIN = 0.98
-GATED_GRAPHS = ("dinner_canonical",)
 
 
 def parse_seeds(spec: str) -> list[int]:
@@ -95,6 +94,8 @@ def _graph_report(episodes: list[dict]) -> dict:
 
 def evaluate(graph_names: list[str], seeds: list[int], dr_profile: str) -> dict:
     """Run each named graph over each seed and build the report dict."""
+    if not graph_names or not seeds:
+        raise ValueError("evaluation requires at least one graph and one seed")
     graphs: dict[str, dict] = {}
     for name in graph_names:
         if name not in CANONICAL_GRAPHS:
@@ -115,7 +116,7 @@ def evaluate(graph_names: list[str], seeds: list[int], dr_profile: str) -> dict:
         "thresholds": {
             "first_attempt_min": FIRST_ATTEMPT_MIN,
             "with_retry_min": WITH_RETRY_MIN,
-            "gated_graphs": list(GATED_GRAPHS),
+            "gated_graphs": list(graphs),
         },
     }
     report["violations"] = threshold_violations(report)
@@ -124,11 +125,19 @@ def evaluate(graph_names: list[str], seeds: list[int], dr_profile: str) -> dict:
 
 
 def threshold_violations(report: dict) -> list[str]:
-    """Threshold breaches, using the same numbers the end-to-end tests assert."""
+    """Threshold breaches, using the same numbers the end-to-end tests assert.
+
+    Every graph present in the report is gated: an evaluation only ever
+    contains graphs the caller asked for, so a graph that ran but failed must
+    fail the report, and a report with no graphs (or no episodes behind one)
+    is a broken run, not a pass.
+    """
     violations = []
-    for name in GATED_GRAPHS:
-        graph = report["graphs"].get(name)
-        if graph is None:
+    if not report["graphs"]:
+        return ["evaluation contains no graphs"]
+    for name, graph in report["graphs"].items():
+        if not graph["episodes"]:
+            violations.append(f"{name}: no episodes recorded")
             continue
         if graph["first_attempt_rate"] < FIRST_ATTEMPT_MIN:
             violations.append(

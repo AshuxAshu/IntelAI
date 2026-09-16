@@ -26,7 +26,6 @@ from dinner_table.policies.conditioning import goal_for_skill
 from dinner_table.reasoning.schema import RelativeTarget
 from dinner_table.scene.objects import (
     BOTTLE_MOUTH_Z,
-    BOTTLE_NECK_Z,
     MUG_INNER_R,
     MUG_RIM_Z,
 )
@@ -39,15 +38,7 @@ from dinner_table.teacher.kinematics import arm_q, site_pose
 # Every catalog object's body origin rests at its base: a placed object's
 # target height is the supporting surface, not surface + half-height.
 PLACE_Z = {"table": TABLE_TOP_HEIGHT, "drawer": 0.385}
-# The neck pinch rides a 3 cm wall: the lift must stay on the neck, so
-# only ~1.2 cm of base clearance is available — enough for a checked transit.
-# Cutlery: the eastern drawer columns' IK ceiling caps a pure-vertical lift
-# at ~13-19 mm; the transit clearance is established by Place's carry rise
-# instead (the drawer is still open at pick time, so nothing is transited).
-LIFT_MIN = {
-    "bottle": 0.012,
-    "fork_1": 0.012, "fork_2": 0.012, "spoon_1": 0.012, "spoon_2": 0.012,
-}
+LIFT_MIN = {"bottle": 0.05}
 DEFAULT_LIFT_MIN = 0.02
 # Closed-loop seating: a carried vessel hangs off its grasp point and rocks
 # flat against the table as it touches down, so where it lands cannot be
@@ -96,19 +87,20 @@ CARRY_GRIP_TORQUE = {
 # The anchor may shift toward the receiving arm.
 RELAY_ANCHOR = (0.0, -0.02)
 RELAY_ARM_BIAS = 0.04
-# Pour schedule. The tilt is
-# realized as an orientation target on the pinned jaw-spread axis rather than
-# a raw wrist_flex override: the wrist joint sits ~0.1 m behind the tool point,
-# so a bare joint override swings the grasp point through a 0.1 m arc into the
-# table, while an IK-held tool point tilts in place (the wrist still does most
-# of the work).
-POUR_TILT_DEG = 78.0
+# Pour schedule. POUR_TILT_DEG is the commanded arc tilt, but grasp compliance
+# rotates the bottle back inside the jaws under load (measured: actual tilt
+# 46.5 deg against 72 commanded, and a further 46.5 -> 21 deg slide when more
+# tilt is commanded, at double mass). Commanded extra tilt therefore worsens
+# the slip; the return must re-measure the physical bottle pose instead.
+POUR_TILT_DEG = 72.0
 POUR_FLOW_TILT_DEG = 55.0
-POUR_RAMP_S = 3.2
-POUR_DWELL_S = 1.2
-POUR_STEPS = 16
+POUR_GRIP_TORQUE = 2.5  # N m, below the gripper actuator's 2.94 N m limit.
+# Measured boundary: even at the actuator's physical 2.94 N m cap the
+# double-mass bottle over the table reaches only ~46.5 deg actual tilt
+# (55 deg required to flow) with progressive neck slip, and commanding more
+# tilt slides it further (46.5 -> 21 deg). The heavy/table pour is a physical
+# limit of the modeled neck pinch, not a planner or threshold issue.
 POUR_RATE_PER_S = 0.55  # mug fill fraction gained per second of flow
-POUR_LIP_CLEAR_M = 0.030  # pour lip height above the mug rim at full tilt
 
 
 class Skill:
@@ -414,6 +406,10 @@ class Pick(Skill):
                 if not exited:
                     raise SkillFailed("pick", "lift", "ik_unreachable")
         self._set_phase("verify")
+        if frame.check_upright and ctx.object_upright(self.object_name) < float(
+            np.cos(np.deg2rad(frame.max_tilt_deg))
+        ):
+            raise SkillFailed("pick", "verify", "missed_grasp")
         pos, _ = ctx.object(self.object_name)
         lift = float(pos[2]) - self._origin_z
         lift_min = LIFT_MIN.get(self.object_name, DEFAULT_LIFT_MIN)
@@ -594,9 +590,19 @@ class Place(Skill):
             aligned = False
             while align_z >= TABLE_TOP_HEIGHT + 0.05 - 1e-9:
                 try:
-                    yield from ctx.play_cartesian(
-                        self.arm, np.array([align_xy[0], align_xy[1], align_z]),
-                        frame.approach, transit_lateral, 7.0, axis_index=frame.axis_index)
+                    goal = np.array([align_xy[0], align_xy[1], align_z])
+                    if self.object_name == "bottle":
+                        pts = ctx.plan_cartesian(
+                            self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0], goal,
+                            frame.approach, transit_lateral, axis_index=frame.axis_index)
+                        pts = _joint_segment(arm_q(ctx.data, self.arm), pts[-1])
+                        ctx.check_path(self.arm, pts)
+                        grip = ctx._grip_now[self.arm]
+                        yield from ctx.play(self.arm, pts, grip, grip, 7.0)
+                    else:
+                        yield from ctx.play_cartesian(
+                            self.arm, goal, frame.approach, transit_lateral,
+                            7.0, axis_index=frame.axis_index)
                     aligned = True
                     break
                 except IKUnreachable:
@@ -683,6 +689,7 @@ class Place(Skill):
                         pts = ctx.plan_cartesian(
                             self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0],
                             ee_end, frame.approach, frame.lateral,
+                            axis_index=frame.axis_index,
                         )
                     except IKUnreachable as exc:
                         if attempt == 0:
@@ -713,6 +720,17 @@ class Place(Skill):
                         if not seated():
                             raise SkillFailed("place", "descend", "no_support")
                         supported = True
+                    if self.object_name.startswith(("fork", "spoon")):
+                        for correction in range(4):
+                            pos, _ = ctx.object(self.object_name)
+                            residual = target[:2] - pos[:2]
+                            if float(np.linalg.norm(residual)) <= PLACE_RESEAT_TOL_M:
+                                break
+                            correction_goal = site_pose(ctx.data, f"{self.arm}.ee")[0].copy()
+                            correction_goal[:2] += np.clip(residual, -0.004, 0.004)
+                            yield from ctx.play_cartesian(
+                                self.arm, correction_goal, frame.approach, frame.lateral,
+                                1.0, axis_index=frame.axis_index)
                     pos, _ = ctx.object(self.object_name)
                     residual = target[:2] - pos[:2]
                     if float(np.linalg.norm(residual)) <= PLACE_RESEAT_TOL_M:
@@ -729,7 +747,7 @@ class Place(Skill):
                     try:
                         yield from ctx.play_cartesian(
                             self.arm, site_now + np.array([0.0, 0.0, PLACE_RESEAT_LIFT_M]),
-                            frame.approach, frame.lateral, 1.2,
+                            frame.approach, frame.lateral, 1.2, axis_index=frame.axis_index,
                         )
                     except (IKUnreachable, SkillFailed):
                         break  # cannot lift to re-seat: keep what we have
@@ -741,7 +759,8 @@ class Place(Skill):
         # just-supported object ~6 mm as the pinch preload relaxes
         # (measured on the mug).
         ctx.end_carry(self.arm)
-        yield from ctx.open_gripper(self.arm, 0.30, 3.0)
+        release_aperture = 0.15 if self.object_name.startswith(("fork", "spoon")) else 0.30
+        yield from ctx.open_gripper(self.arm, release_aperture, 3.0)
         # Slide the fixed jaw off the object before lifting at all.
         site_now, rot_now = site_pose(ctx.data, f"{self.arm}.ee")
         try:
@@ -1067,7 +1086,7 @@ class Handoff(Skill):
 class Pour(Skill):
     """Tilt a held bottle over a mug until the target fill is reached."""
 
-    phases = ("lift", "align", "tilt", "return", "verify")
+    phases = ("prepare", "plan", "align", "tilt", "return", "verify")
 
     def __init__(self, arm: str, object_name: str = "bottle", target: str = "mug",
                  amount: float = 0.6) -> None:
@@ -1117,78 +1136,83 @@ class Pour(Skill):
         drained = gained * MAX_WATER_HALF_HEIGHT[self.target] / MAX_WATER_HALF_HEIGHT["bottle"]
         set_fill_fraction(model, "bottle", ctx.fill_fraction("bottle") - drained)
 
-    def run(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
+    def prepare(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
+        """Move the receiver into the common pouring workspace using real grasps."""
+        receiver = "B" if self.arm == "A" else "A"
         if ctx.carrying.get(self.arm) != self.object_name:
-            raise SkillFailed("pour", "lift", "dropped")
-        frame = self.catalog.frame(ctx.scene, self.object_name, self.arm)
-        lateral = self.catalog.side_lateral(self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0])
-        rim, rim_z = self._interior(ctx)
-        # The lip swings on the neck radius as the bottle tilts, so the tool
-        # point is carried high enough that the lip still clears the rim at
-        # full tilt, and offset back along the swing so the lip ends up over
-        # the mug's center rather than its wall.
-        swing = BOTTLE_MOUTH_Z - BOTTLE_NECK_Z
-        lift_z = rim_z + POUR_LIP_CLEAR_M + swing * np.cos(np.radians(POUR_TILT_DEG))
-        lead = 0.5 * swing * np.sin(np.radians(POUR_TILT_DEG))
-        station = np.array([rim[0], rim[1], lift_z]) - lead * lateral
-        self._set_phase("lift")
-        with ctx.grip_saturation(self.arm, CARRY_GRIP_TORQUE.get(self.object_name, 0.5)):
-            here = site_pose(ctx.data, f"{self.arm}.ee")[0]
-            try:
-                yield from ctx.play_cartesian(
-                    self.arm, np.array([here[0], here[1], max(lift_z, here[2])]),
-                    frame.approach, None, 2.5, axis_index=frame.axis_index,
-                )
-            except IKUnreachable as exc:
-                raise SkillFailed("pour", "lift", "ik_unreachable") from exc
+            raise SkillFailed("pour", "prepare", "dropped")
+        from dinner_table.scene.objects import MUG_WALL_R, PLATE_RIM_R
+
+        mug_pos, _ = ctx.object(self.target)
+        plate_pos, _ = ctx.object("plate")
+        clearance = PLATE_RIM_R + MUG_WALL_R + 0.035
+        station = np.array([0.0, plate_pos[1] - np.sqrt(
+            max(0.0, clearance ** 2 - plate_pos[0] ** 2))])
+        if np.linalg.norm(mug_pos[:2] - station) < 0.015:
+            return  # staged — held or resting at the station, nothing to move
+        if ctx.carrying[receiver] not in (None, self.target):
+            raise SkillFailed("pour", "prepare", "receiver_busy")
+        self._set_phase("prepare")
+        if ctx.carrying[receiver] == self.target:
+            # Receiver already holds the mug: park the bottle clear of the
+            # staging corridor, reseat the mug, then re-take both grasps.
+            yield from Place(self.arm, self.object_name, (0.04, -0.02)).run(ctx)
+            ctx.latch_hold()
+            yield from Place(receiver, self.target, station).run(ctx)
+            ctx.latch_hold()
+            yield from Pick(receiver, self.target).run(ctx)
+            ctx.latch_hold()
+            yield from Pick(self.arm, self.object_name).run(ctx)
+            ctx.latch_hold()
+        else:
+            yield from Place(self.arm, self.object_name, (0.04, -0.02)).run(ctx)
+            ctx.latch_hold()
+            yield from Pick(receiver, self.target).run(ctx)
+            ctx.latch_hold()
+            yield from Place(receiver, self.target, station).run(ctx)
+            ctx.latch_hold()
+            yield from Pick(self.arm, self.object_name).run(ctx)
+            ctx.latch_hold()
+
+    def run(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
+        from dinner_table.teacher.pour_planner import plan_pour, plan_return
+
+        yield from self.prepare(ctx)
+
+        if ctx.carrying.get(self.arm) != self.object_name:
+            raise SkillFailed("pour", "plan", "dropped")
+        rim, _ = self._interior(ctx)
+        mouth_goal = rim + np.array([0.0, 0.0, 0.052])
+        self._set_phase("plan")
+        path = plan_pour(ctx, self.arm, self.object_name, mouth_goal, POUR_TILT_DEG)
+        # The neck pinch carries the bottle's full weight below the jaw line;
+        # the ordinary carry clamp lets it lever out mid-arc (measured: 27 mm
+        # slip then jaw unload), so pouring squeezes harder, still bounded.
+        with ctx.grip_saturation(self.arm, POUR_GRIP_TORQUE):
+            grip = ctx._grip_now[self.arm]
             self._set_phase("align")
-            try:
-                yield from ctx.play_cartesian(self.arm, station, frame.approach, None, 4.0,
-                                              axis_index=frame.axis_index)
-            except IKUnreachable as exc:
-                raise SkillFailed("pour", "align", "ik_unreachable") from exc
+            yield from ctx.play(self.arm, path.joints, grip, grip, 8.0)
             self._set_phase("tilt")
-            yield from self._ramp(ctx, station, lateral, 0.0, POUR_TILT_DEG)
-            dwell_end = float(ctx.data.time) + POUR_DWELL_S
-            hold_q = arm_q(ctx.data, self.arm)
-            while float(ctx.data.time) < dwell_end:
+            end = float(ctx.data.time) + 3.0
+            while float(ctx.data.time) < end:
+                before = float(ctx.data.time)
+                yield from ctx.hold(self.arm, path.joints[-1], 0.08)
+                if self._flowing(ctx) and ctx.fill_fraction(self.target) < self.amount:
+                    self._transfer(ctx, float(ctx.data.time) - before)
                 if ctx.fill_fraction(self.target) >= self.amount:
                     break
-                before = float(ctx.data.time)
-                yield from ctx.hold(self.arm, hold_q, 0.08)
-                if self._flowing(ctx):
-                    self._transfer(ctx, float(ctx.data.time) - before)
             self._set_phase("return")
-            yield from self._ramp(ctx, station, lateral, POUR_TILT_DEG, 0.0)
+            recovery = plan_return(ctx, self.arm, self.object_name)
+            yield from ctx.play(self.arm, recovery.joints, grip, grip, 4.0)
+            if ctx.object_upright(self.object_name) < 0.98:
+                raise SkillFailed("pour", "return", "not_upright")
+            if min(ctx.finger_forces(self.arm, self.object_name)) <= JAW_FORCE_MIN:
+                raise SkillFailed("pour", "return", "lost_grasp")
         self._set_phase("verify")
         if ctx.fill_fraction(self.target) < 0.8 * self.amount:
             raise SkillFailed("pour", "verify", "spilled")
-
-    def _ramp(self, ctx: TeacherContext, station: np.ndarray, lateral: np.ndarray,
-              start_deg: float, end_deg: float) -> Iterator[np.ndarray]:
-        """Rotate the pinned jaw-spread axis from start_deg to end_deg of tilt."""
-        seconds = POUR_RAMP_S * abs(end_deg - start_deg) / max(POUR_TILT_DEG, 1e-6)
-        per_step = max(seconds / POUR_STEPS, 0.05)
-        for step in range(1, POUR_STEPS + 1):
-            angle = start_deg + (end_deg - start_deg) * step / POUR_STEPS
-            axis = self._tilted_up(lateral, angle)
-            try:
-                points = ctx.plan_cartesian(self.arm, station, station, axis, None,
-                                            q_start=arm_q(ctx.data, self.arm), axis_index=1)
-            except IKUnreachable as exc:
-                raise SkillFailed("pour", self.phase, "ik_unreachable") from exc
-            grip = ctx._grip_now[self.arm]
-            before = float(ctx.data.time)
-            yield from ctx.play(self.arm, points, grip, grip, per_step)
-            if self._flowing(ctx):
-                self._transfer(ctx, float(ctx.data.time) - before)
-
-    def _tilted_up(self, lateral: np.ndarray, degrees: float) -> np.ndarray:
-        """World up rotated by `degrees` about the gripper's jaw-spread axis."""
-        theta = np.radians(degrees)
-        up = np.array([0.0, 0.0, 1.0])
-        axis = np.asarray(lateral, dtype=np.float64)
-        return up * np.cos(theta) + np.cross(axis, up) * np.sin(theta)
+        if ctx.object_upright(self.object_name) < 0.98:
+            raise SkillFailed("pour", "verify", "not_upright")
 
 
 class ParallelGroup:
@@ -1220,6 +1244,8 @@ class ParallelGroup:
                 raise SkillFailed("parallel", "claim", "zone_conflict")
 
     def run(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
+        if isinstance(self.primary, Pour) and isinstance(self.partner, Hold):
+            yield from self.primary.prepare(ctx)
         self._claim(ctx)
         lead = self.primary.run(ctx)
         follow = self.partner.run(ctx)

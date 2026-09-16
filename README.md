@@ -4,6 +4,18 @@
 [![mujoco](https://img.shields.io/badge/MuJoCo-3.2-orange)](https://mujoco.org/)
 [![openvino](https://img.shields.io/badge/OpenVINO-2026.3-8a2be2)](https://docs.openvino.ai/)
 
+## Demo
+
+<video src="assets/demo/end_to_end_seed5.mp4" controls autoplay muted loop playsinline width="100%">
+  <a href="assets/demo/end_to_end_seed5.mp4">Watch the demo video</a>
+</video>
+
+**End-to-end table setting for Seed-5**
+
+[Watch or download the video](assets/demo/end_to_end_seed5.mp4)
+
+---
+
 **What this project is.** An end-to-end Physical AI solution for bimanual robotic
 manipulation in simulation. Two official **SO-101** arms in **MuJoCo** interpret a
 natural-language instruction, reason over camera observations, coordinate both
@@ -237,6 +249,21 @@ demonstration matrix covers every dual-arm rubric line:
 | Coordinated concurrent action | Both arms retrieve different utensils from the open drawer at once |
 | Shared-workspace reasoning | Arm reassignment when an object spawns only in the other arm's reach |
 
+**Accepted pouring scope:** double-mass, table-supported pouring is outside the
+accepted operating scope. This means the A7 ×2.0 bottle mass/inertia condition
+with the receiving mug resting on the table. Bounded trials failed to establish
+valid flow and recovery; this is a scope decision, not proof of physical
+impossibility. Heavy held-mug pouring, half-mass/table pouring, bottle placement,
+and table-supported relay remain in scope.
+[Amendment 4](docs/PLAN_AMENDMENTS.md#amendment-4--accepted-pouring-scope-exclude-double-masstable-support)
+records the evidence and downstream handling: only promises requiring that
+exact combination inherit the exclusion, not entire data/training/evaluation
+milestones. Excluded diagnostics must be labeled separately and cannot count as
+successful demonstrations or accepted-scope passes. Dataset quotas and retained
+acceptance thresholds remain unchanged. **A6–A8 acceptance is still incomplete**;
+see the [integration status](docs/A6_A8_INTEGRATION_STATUS.md). Documentation
+does not change the legacy four-condition test matrix or CI selection.
+
 ACT is conditioned structurally, not textually: a 35-dim vector is packed into
 `observation.state` (10 arm joints, 2 gripper apertures, active-arm one-hot,
 9-skill one-hot, 9-object one-hot, goal xyz), so the native ACT policy — which
@@ -272,7 +299,11 @@ before advancing.
 rather than bolted on afterwards: object mass ×0.5–2.0, friction 0.4–1.2, spawn
 pose ±6 cm / ±25°, light intensity and color temperature, and texture/background
 variation — each axis a seeded mutation, so eval extremes (±10 cm, ×0.3–3.0 mass,
-unseen textures) are strictly outside the training hull.
+unseen textures) are strictly outside the training hull. These ranges do not
+imply accepted support for every mass/support combination: Amendment 4's exact
+pouring exclusion applies. Keep general mass randomization and heavy held-mug
+coverage; record mass condition and mug support mode in generated-data metadata
+and report excluded diagnostics separately.
 
 **4. ACT training via Intel Physical AI Studio.** Native
 `physicalai.policies.ACT` (PyTorch Lightning) is trained on the exported LeRobot

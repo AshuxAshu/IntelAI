@@ -15,7 +15,7 @@ FORK_SETTING = RelativeTarget(relation="left_of", anchor="plate")
 SPOON_SETTING = RelativeTarget(relation="left_of", anchor="fork_1")
 
 CANONICAL_INSTRUCTION = (
-    "Open the top drawer, pick up the plate with arm A, place it on the table, "
+    "Open and close the top drawer, pick up the plate with arm A, place it on the table, "
     "pick up the mug with arm B, pour water into the mug with arm A."
 )
 
@@ -24,12 +24,13 @@ _CANONICAL = TaskGraph(
     instruction=CANONICAL_INSTRUCTION,
     steps=[
         Step(id=1, skill="open_drawer", arm="A", object="drawer_top"),
-        Step(id=2, skill="pick", arm="A", object="plate"),
-        Step(id=3, skill="place", arm="A", object="plate", target="placemat_1"),
-        Step(id=4, skill="pick", arm="B", object="mug"),
-        Step(id=5, skill="pick", arm="A", object="bottle"),
-        Step(id=6, skill="hold", arm="B", object="mug", parallel_group=1),
-        Step(id=7, skill="pour", arm="A", object="bottle", target="mug",
+        Step(id=2, skill="close_drawer", arm="A", object="drawer_top"),
+        Step(id=3, skill="pick", arm="A", object="plate"),
+        Step(id=4, skill="place", arm="A", object="plate", target="placemat_1"),
+        Step(id=5, skill="pick", arm="B", object="mug"),
+        Step(id=6, skill="pick", arm="A", object="bottle"),
+        Step(id=7, skill="hold", arm="B", object="mug", parallel_group=1),
+        Step(id=8, skill="pour", arm="A", object="bottle", target="mug",
              amount=0.6, parallel_group=1),
     ],
 )

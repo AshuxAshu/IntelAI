@@ -1,13 +1,12 @@
 """A6 per-skill verification: pick, place, and drawer skills over DR seeds.
 
 The thresholds are the Phase 2 acceptance levels (pick/drawer >= 98%, place
->= 95%). Measured rates at the time of writing (see docs/PLAN_AMENDMENTS.md,
-Amendment 3): pick 8/8 per object over seeds 0-7; drawer open/close 28/28
-including both drawer-friction extremes; place mug 6/6, fork_1 6/6,
-plate 4/6; cutlery-spoon place and the bottle are known-open (xfail below).
+>= 95%). Bottle pick is a regular 20-seed dr_train gate (0-19); the stale
+single-axis-IK xfail was removed after re-verification on 2026-09-17.
+See docs/PLAN_AMENDMENTS.md, Amendment 3 for the bottle evidence.
 
-The seed budget here is deliberately bounded so the file stays a usable CI
-gate; the wider verification runs are recorded in the amendment.
+Other rate tests retain their four-seed budget pending wider verification.
+Plate and spoon_2 placement still have known-open xfails below.
 """
 
 from __future__ import annotations
@@ -143,12 +142,23 @@ def test_place_known_open(name: str, target: str) -> None:
     assert name not in outcomes and err < 0.008, f"{outcomes.get(name)} err={err:.4f}"
 
 
-@pytest.mark.xfail(reason="known-open (Amendment 3): the bottle neck side-grasp "
-                          "needs a single-axis IK mode our solver lacks",
-                   strict=False)
-def test_pick_bottle_known_open() -> None:
-    outcomes, _, _ = _episode(0, {"bottle": "A"}, {})
-    assert not outcomes, outcomes
+def test_pick_bottle() -> None:
+    """Bottle pick is fixed (single-axis neck grasp works); gate it regularly."""
+    seeds = tuple(range(20))
+    arm = "A"
+    ok = 0
+    details = []
+    for seed in seeds:
+        z0 = _spawn_z(seed, "bottle")
+        outcomes, scene, _ = _episode(seed, {"bottle": arm}, {})
+        pos, _ = scene.object_pose("bottle")
+        lifted = float(pos[2]) - z0
+        success = "bottle" not in outcomes and lifted > 0.011
+        ok += success
+        if not success:
+            details.append(f"seed {seed}: {outcomes.get('bottle', 'no-lift')} lift={lifted:+.4f}")
+    rate = ok / len(seeds)
+    assert rate >= 0.98, f"pick bottle: {ok}/{len(seeds)} ({rate:.0%}); {details}"
 
 
 @pytest.mark.parametrize("friction", [0.5, 2.0])

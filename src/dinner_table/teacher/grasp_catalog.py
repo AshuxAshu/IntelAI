@@ -146,7 +146,7 @@ class GraspCatalog:
             # wall is 3 mm thick and the tall body levers straight out of it.
             neck = pos + np.array([0.0, 0.0, BOTTLE_NECK_Z])
             return GraspFrame(neck + self._side_offset(arm, neck), UP, None, 0.30, -1.52,
-                              0.5, 0.055, 0.055, 15.0, axis_index=1)
+                              0.5, 0.055, 0.060, 15.0, axis_index=1)
         # Cutlery rolls when squeezed, so the upright check must not apply
         # (a rolled utensil is still grasped). Descent aperture: wide enough
         # that the arm's servo tracking error (~5-10 mm) cannot land a jaw
