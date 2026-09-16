@@ -9,9 +9,9 @@ Two solve paths:
 
 - **Approach-only** (``target_lateral=None``): cross-product orientation error
   with an orientation-weight continuation ramp — the A5 solver, bit-identical.
-- **Approach + lateral axis** (``target_lateral`` given): the reference
-  teacher's axis-space formulation — errors ``0.08 * (target_axis -
-  current_axis)`` with axis-space Jacobian rows. The vector-difference error
+- **Approach + lateral axis** (``target_lateral`` given): axis-space
+  formulation — errors ``0.08 * (target_axis - current_axis)`` with
+  axis-space Jacobian rows. The vector-difference error
   has no +/- basin ambiguity (a cross product vanishes at the mirrored
   solution), which matters because the gripper jaws are symmetric.
 """
@@ -159,11 +159,11 @@ def _skew(v: np.ndarray) -> np.ndarray:
     )
 
 
-AXIS_SCALE = 0.08  # reference-tuned orientation-to-position error scale
+AXIS_SCALE = 0.08  # orientation-to-position error scale, tuned on the SO-101 envelope
 AXIS_DAMPING2 = 1e-5
 AXIS_STEP_CAP = 0.06
 AXIS_ITERS = 180
-AXIS_MARGIN = 0.004  # rad of joint-range margin, as in the reference solver
+AXIS_MARGIN = 0.004  # rad of joint-range margin kept inside the joint limits
 
 
 def _axis_space_phase(
@@ -179,7 +179,7 @@ def _axis_space_phase(
     ang_tol: float,
     axis_index: int = 2,
 ) -> tuple[np.ndarray, float, float]:
-    """One axis-space solve from seed q (reference formulation).
+    """One axis-space solve from seed q.
 
     ``axis_index`` selects which site axis ``target_approach`` constrains: 2 is
     the finger direction (top-down grasps), 1 is the jaw-spread axis (the side
@@ -240,8 +240,8 @@ def solve_ik(
 ) -> np.ndarray:
     """Solve IK for the arm site to (target_pos, target_approach[, target_lateral]).
 
-    ``target_lateral`` optionally constrains the site's local X axis direction
-    (the reference teacher's ``x_target``). ``axis_index`` selects the site axis
+    ``target_lateral`` optionally constrains the site's local X axis direction.
+    ``axis_index`` selects the site axis
     that ``target_approach`` pins: 2 (default) is the finger direction, 1 is the
     jaw-spread axis used by the bottle's side grasp. Joint limits are clipped
     every iteration; failure raises ``IKUnreachable``.

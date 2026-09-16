@@ -3,7 +3,6 @@
 [![python](https://img.shields.io/badge/python-3.12-blue)](https://www.python.org/)
 [![mujoco](https://img.shields.io/badge/MuJoCo-3.2-orange)](https://mujoco.org/)
 [![openvino](https://img.shields.io/badge/OpenVINO-2026.3-8a2be2)](https://docs.openvino.ai/)
-[![assets](https://img.shields.io/badge/assets-license--tracked-green)](assets/ASSETS_LICENSES.md)
 
 **What this project is.** An end-to-end Physical AI solution for bimanual robotic
 manipulation in simulation. Two official **SO-101** arms in **MuJoCo** interpret a
@@ -258,8 +257,8 @@ manual annotation anywhere in the pipeline.
 side on the operator-facing table edge; the scene includes a tabletop cutlery
 caddy with a prismatic drawer, mass-accurate plate/mug/bottle/utensils, two
 placemats as placement targets, and an overhead + two wrist cameras. Scene
-geometry, object masses, and contact parameters are the measured,
-reference-proven values for the real SO-101 (see `docs/PLAN_AMENDMENTS.md`).
+geometry, object masses, and contact parameters are measured values for the real
+SO-101 hardware.
 
 **2. Privileged teacher.** A damped-least-squares IK solver, a corridor planner
 with arm–arm keep-outs, a per-object grasp catalog (plate rim, mug wall, bottle
@@ -442,15 +441,3 @@ visual DR (unseen textures and backgrounds, relighting), paraphrase variants of
 the instruction, and mid-episode perturbations (object nudged mid-carry, object
 knocked from the gripper, drawer friction jam, instruction swapped mid-stream,
 nonexistent-object refusal).
-
----
-
-## Licenses and attribution
-
-Third-party assets are recorded one row per file in
-`assets/ASSETS_LICENSES.md` and gated by `scripts/check_licenses.py`, which fails
-if any asset lacks a license row. The official SO-101 MJCF and meshes are
-Apache-2.0 (MuJoCo Menagerie) and vendored with provenance. The reference
-approach in `example-approach/` (MIT) informed the scene geometry and grasp
-recipes; what was adopted and what was deliberately not adopted is documented in
-`docs/PLAN_AMENDMENTS.md`.

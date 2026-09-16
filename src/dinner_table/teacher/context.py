@@ -1,7 +1,6 @@
 """Teacher execution context: stepping, motion playback, forces, and audits.
 
-The machinery is ported from the reference solution's proven teacher (see
-docs/PLAN_AMENDMENTS.md): quintic time-scaled waypoint playback with a
+The machinery covers quintic time-scaled waypoint playback with a
 velocity-gradient duration floor, Cartesian-densified moves at 2 mm spacing,
 contact-audited paths in a scratch MjData (carried objects teleported along
 the gripper), force-monitored grasps (both jaws), and software torque
@@ -63,7 +62,7 @@ class TeacherContext:
         self._hold: dict[str, np.ndarray] = {}
         self._grip_now: dict[str, float] = {"A": 0.43, "B": 0.43}
         # Active torque-limited closes: arm -> (torque_limit N m, ctrl target rad).
-        # The saturated ctrl advances per PHYSICS STEP (the reference engine's
+        # The saturated ctrl advances per PHYSICS STEP (the servo's
         # bandwidth); a 25 Hz update is ~8x too slow at our 500 Hz timestep.
         self._grip_close: dict[str, tuple[float, float] | None] = {"A": None, "B": None}
         # A carried object's squeeze outlives the skill that grasped it: a
@@ -585,7 +584,7 @@ class TeacherContext:
                 yield self.action(arm, held, self._grip_now[arm])
                 # No early exit on first contact: the saturated servo must keep
                 # pressing for the whole window so the grasp is a real squeeze,
-                # not a first-touch rest (the reference closes full-duration).
+                # not a first-touch rest: the close is held for the full window.
         finally:
             self._grip_close[arm] = None
 

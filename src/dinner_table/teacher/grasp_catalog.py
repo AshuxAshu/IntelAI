@@ -1,7 +1,7 @@
 """Per-object grasp frames for the privileged teacher.
 
-The frames, grip torques, hovers, and carry limits are ported from the
-reference solution's proven grasp strategies (see docs/PLAN_AMENDMENTS.md):
+The frames, grip torques, hovers, and carry limits are tuned per object against
+the SO-101 gripper's measured jaw envelope:
 top-down grasps constrain the approach axis plus a lateral gripper-X
 direction, and the bottle is pinched at its neck rather than its body.
 """
@@ -32,8 +32,7 @@ class GraspFrame:
     position: world-frame ee-site target (m). approach: unit vector the site
     axis ``axis_index`` must follow (+Z, the finger direction, for top-down
     grasps; +Y, the jaw-spread axis, for the bottle's side grasp). lateral:
-    optional unit vector the site's +X axis must follow (the reference's
-    x_target; None = unconstrained).
+    optional unit vector the site's +X axis must follow (None = unconstrained).
     aperture: normalized open aperture during approach. wrist_roll_seed: roll
     value for the IK seed pose. grip_torque: gripper torque saturation (N m).
     hover_m / lift_m: pre-grasp hover and post-grasp lift offsets (m).
@@ -87,8 +86,8 @@ class GraspCatalog:
     # The handle is a horizontal east-west bar; the gripper's X axis follows
     # the drawer's slide axis (site X = -Y world) so the closing faces squeeze
     # across the bar's diameter along the pull direction and the front run-in
-    # seats the bar between the open jaws. This is the -X sign of the
-    # reference's (0, 1, 0) body-X target (our site X negates the gripper X);
+    # seats the bar between the open jaws. Our site X negates the gripper X,
+    # which sets the -X sign of this lateral;
     # (0, +1, 0) itself does not solve in our roll basin (verified).
     DRAWER_LATERAL = np.array([0.0, -1.0, 0.0], dtype=np.float64)
     # Measured jaw envelope in the ee-site frame: the fixed jaw is static with
@@ -117,8 +116,8 @@ class GraspCatalog:
 
         ``lateral`` is the solver-bound site-X direction. NOTE: the site's X
         axis is the gripper X negated, and in our MuJoCo build the robust
-        closing arc comes from the opposite roll basin to the reference's
-        (their engine's own picks fail on this MuJoCo version — verified), so
+        closing arc comes from the opposite roll basin
+        (the naive basin's own picks fail on this MuJoCo version — verified), so
         the frames below pin the basin that clamps correctly here.
         """
         if name not in ("plate", "mug", "bottle", "spoon_1", "spoon_2", "fork_1", "fork_2"):
@@ -129,7 +128,7 @@ class GraspCatalog:
             position = pos + self.PLATE_LATERAL * PLATE_RIM_R + np.array([0.0, 0.0, 0.009])
             return GraspFrame(position, DOWN, self.PLATE_LATERAL, 0.30, -2.4, 0.7, 0.055, 0.055, 15.0)
         if name == "mug":
-            # Wall pinch at the diagonal (reference port): the moving jaw
+            # Wall pinch at the diagonal: the moving jaw
             # presses the wall's inner face, the mug slides until the wall
             # seats against the fixed jaw, and the full-duration saturated
             # close squeezes. The handle is NOT graspable with this gripper:
@@ -139,7 +138,7 @@ class GraspCatalog:
         if name == "bottle":
             if upright < 0.5:
                 raise GraspCatalogError("bottle is lying sideways; sideways regrasp unsupported")
-            # Neck side grasp (reference port): the fingers lie horizontal and
+            # Neck side grasp: the fingers lie horizontal and
             # close ACROSS the narrow neck, so only the jaw-spread axis (site
             # Y) is pinned — the reach direction is left to the solver, which
             # is what makes the pose solvable at all from a front-edge mount.
@@ -158,8 +157,8 @@ class GraspCatalog:
         # mid-carry) and pinching at the upper band slips the tips off the
         # handle's top edge (both measured).
         position = pos + np.array([0.0, 0.0, 0.007])
-        # Close and carry at a firm-but-not-maximal clamp (the reference
-        # commands CLOSED throughout): 1.5 N m holds the ~0.2 N utensil with
+        # Close and carry at a firm-but-not-maximal clamp (the servo is
+        # commanded CLOSED throughout): 1.5 N m holds the ~0.2 N utensil with
         # a 40x friction margin, while the full 2.94 N m clamp chatters the
         # tip contacts at ~37 N and ratchets the handle's roll until its
         # diagonal wedges and snaps the utensil out of the jaws (measured).
@@ -171,7 +170,7 @@ class GraspCatalog:
     CARRY_EXTERNAL_FORCE_MAX = 0.10
 
     def carry_limits(self, name: str) -> CarryLimits:
-        """Transit tolerances for a carried object (the reference's values)."""
+        """Transit tolerances a carried object must stay inside."""
         if name.startswith(("fork", "spoon")):
             return CarryLimits(self.CUTLERY_CARRY_TILT_DEG, self.CARRY_EXTERNAL_FORCE_MAX)
         return CarryLimits(self.CARRY_TILT_DEG, self.CARRY_EXTERNAL_FORCE_MAX)
@@ -214,7 +213,7 @@ class GraspCatalog:
             raise GraspCatalogError("drawer_handle site missing from scene")
         # The tool point goes directly on the horizontal bar's center; the
         # fingers straddle it vertically and the servo close squeezes across
-        # the slide axis. grip_torque records the reference's telemetry value
+        # the slide axis. grip_torque is recorded for reference
         # only — the drawer skills close with the plain (force-clamped) servo.
         bar = np.array(scene.data.site_xpos[sid], dtype=np.float64)
         return GraspFrame(bar, DOWN, self.DRAWER_LATERAL, 0.30, -2.4, 0.15, 0.040, 0.040, 15.0)

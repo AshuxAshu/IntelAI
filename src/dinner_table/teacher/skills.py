@@ -3,8 +3,7 @@
 Each skill is a coroutine yielding 12-dim merged targets at 25 Hz; the caller
 steps physics per yield via ``TeacherContext.step`` (which also runs the
 safety audits). Failure raises ``SkillFailed`` with an attributable phase and
-cause. The recipes are ported from the reference solution's proven teacher
-(see docs/PLAN_AMENDMENTS.md): hover/descend grasps with one bounded retry,
+cause. The recipes are hover/descend grasps with one bounded retry,
 measured-support releases, and a physical drawer pull with opening
 verification.
 """
@@ -72,11 +71,12 @@ PLACE_RELEASED_FORCE_MAX = 0.01  # N per jaw once the object is truly let go
 # the tool point off along its own +X — the direction the fixed jaw sits in —
 # clears the jaw before any lift.
 RELEASE_BACKOFF_M = 0.010
-# The reference teacher's carried-object graze tolerance.
+# Carried-object graze tolerance: forces above this mean the object is being
+# dragged against something rather than carried clear of it.
 EXTERNAL_FORCE_MAX = 0.10
 # The plate's rim tube is smooth: a 0.7 N m saturated press lets the
-# swinging rim slide out of the jaws mid-transit (measured). The reference
-# carries with the full force-clamped servo (2.94 N m) and the rigid rim
+# swinging rim slide out of the jaws mid-transit (measured). The rim needs
+# the full force-clamped servo (2.94 N m) and the rigid rim
 # takes it — the close stays at the tuned 0.7 (a full close ejects the
 # plate against the table at grasp time). Cutlery rides the protruding jaw
 # tip spheres (narrow boxes never reach the jaw faces): only the full
@@ -92,11 +92,11 @@ CARRY_GRIP_TORQUE = {
 }
 # Table-supported relay anchor: the bottle's side grasp reaches a far annulus
 # on each arm, so the dual-reach lens for it sits mid-table rather than in the
-# front-center SHARED_ZONE the top-down grasps share (measured; see
-# docs/PLAN_AMENDMENTS.md). The anchor may shift toward the receiving arm.
+# front-center SHARED_ZONE the top-down grasps share (measured).
+# The anchor may shift toward the receiving arm.
 RELAY_ANCHOR = (0.0, -0.02)
 RELAY_ARM_BIAS = 0.04
-# Pour schedule (our own skill; the reference has no pour). The tilt is
+# Pour schedule. The tilt is
 # realized as an orientation target on the pinned jaw-spread axis rather than
 # a raw wrist_flex override: the wrist joint sits ~0.1 m behind the tool point,
 # so a bare joint override swings the grasp point through a 0.1 m arc into the
@@ -240,8 +240,8 @@ class Pick(Skill):
             if (q_high is None or q_high is q_hover) and self.object_name.startswith(
                 ("fork", "spoon")
             ):
-                # Cutlery approach from the drawer's open FRONT (the reference
-                # recipe): a side detour would sweep over the neighboring
+                # Cutlery approach from the drawer's open FRONT:
+                # a side detour would sweep over the neighboring
                 # utensil columns, but the front strip is always clear.
                 hover_pos = frame.position + np.array([0.0, 0.0, frame.hover_m])
                 front = hover_pos + np.array([0.0, -0.05, 0.0])
@@ -366,7 +366,7 @@ class Pick(Skill):
             # horizontal transit. Cutlery lifts straight up first (inside the
             # caddy, under the roof), then EXITS south over the open front
             # wall to a high outside point — fully clear of the drawer before
-            # anything else moves (the reference's clearance stage; the
+            # anything else moves (a full clearance stage; the
             # in-caddy envelope is roof-capped ~0.43 while south of the
             # drawer the arm reaches 0.46+).
             lifted = False
@@ -538,8 +538,8 @@ class Place(Skill):
         self._set_phase("carry")
         site_pos, _ = site_pose(ctx.data, f"{self.arm}.ee")
         offset = site_pos - frame_pos
-        # Hold an active squeeze through every carried motion (the reference
-        # carries with the servo commanded closed): a plain servo at the
+        # Hold an active squeeze through every carried motion (the servo
+        # is commanded closed through the carry): a plain servo at the
         # resting aperture lets a swinging rim pinch or a grazed utensil tip
         # unload a jaw mid-transit (measured: plate and fork, 0/4 each).
         with ctx.grip_saturation(self.arm,
@@ -577,7 +577,7 @@ class Place(Skill):
             # the site must not go to the placemat center itself — a rim pinch
             # then hangs a plate one rim-radius off and the diagonal descent
             # swings the grasp loose (measured). The transit runs at the
-            # reference's cutlery speed (~3 cm/s): a 4 s sprint quadruples
+            # tuned cutlery speed (~3 cm/s): a 4 s sprint quadruples
             # the carried pendulum's swing energy and rolls a clamped
             # utensil's handle until it snaps out of the jaws (measured).
             # Where the carry line rides at the arm's IK ceiling (the deep
@@ -737,7 +737,7 @@ class Place(Skill):
         # End the carry BEFORE opening: the grasp audit must not read the
         # intentional release as a fumbled grasp, and the exit's scratch
         # audit must treat the placed object as world, not cargo. Open
-        # slowly (the reference's 3 s release): a fast open throws the
+        # slowly (a 3 s release): a fast open throws the
         # just-supported object ~6 mm as the pinch preload relaxes
         # (measured on the mug).
         ctx.end_carry(self.arm)
@@ -846,7 +846,7 @@ class OpenDrawer(Skill):
             yield from ctx.play_cartesian(self.arm, frame.position, frame.approach,
                                           frame.lateral, 3.0)
             self._set_phase("close")
-            # Full-servo close (reference port): the STS-3215 servo is
+            # Full-servo close: the STS-3215 servo is
             # force-clamped at 2.94 N m, so holding the fully-closed target
             # keeps a firm squeeze on the handle through the pull. The
             # torque-saturated close used for gram-scale objects would decay

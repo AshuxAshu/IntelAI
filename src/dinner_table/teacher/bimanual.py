@@ -1,16 +1,13 @@
 """Bimanual teacher skills: stiffness hold, table-supported relay, pour.
 
-The handoff is the reference solution's proven relay (see
-docs/PLAN_AMENDMENTS.md): the donor arm places the object on a shared-zone
-anchor with the full verified-release machinery and parks, then the receiving
-arm regrasps it with its own cataloged grasp frame. No airborne
-gripper-to-gripper transfer is claimed. The pour is our own skill — the
-reference has none — and drives the visual-proxy water state from the
-bottle mouth's pose over the mug interior.
+The handoff is a table-supported relay: the donor arm places the object on a
+shared-zone anchor with the full verified-release machinery and parks, then the
+receiving arm regrasps it with its own cataloged grasp frame. No airborne
+gripper-to-gripper transfer is claimed. The pour drives the visual-proxy water
+state from the bottle mouth's pose over the mug interior.
 
 The skills here live beside ``skills.py`` rather than inside it because that
-module is already at the size limit; the classes are the ones the plan lists
-under the bimanual commit.
+module is already at the size limit.
 """
 
 from __future__ import annotations

@@ -25,9 +25,9 @@ from dinner_table.contracts.geometry import (
 from dinner_table.teacher.ik import ik_above, solve_ik
 from dinner_table.teacher.kinematics import arm_q, set_arm_q, site_pose
 
-# Amendment 1: the real SO-101 cannot hold a top-down approach higher than
+# The real SO-101 cannot hold a top-down approach higher than
 # ~10 cm above the table, so both the corridor hovers and the detour lift use
-# the measured hover envelope (the reference teacher hovers 2.5-7 cm).
+# the measured hover envelope (2.5-7 cm).
 SAFE_LIFT_HEIGHT = TABLE_TOP_HEIGHT + 0.10
 HOVER_HEIGHTS = (0.04, 0.06)
 DETOUR_SAMPLES = 32

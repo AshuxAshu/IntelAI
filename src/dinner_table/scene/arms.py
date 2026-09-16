@@ -26,10 +26,10 @@ ARM_XML_PATH = Path("assets/meshes/so101/official/so101_arm.xml")
 MESH_DIR_REL = "so101/official/assets"  # relative to the scene compiler meshdir
 GRASP_SITE_POS = (0.003, 0.0, -0.100)  # tool point at the jaw tips' level (gripper frame)
 GRASP_SITE_QUAT = (0.0, 0.0, 1.0, 0.0)  # 180 deg about Y: site +Z = gripper -Z (fingers), site +X = -gripper +X
-# The site depth matches the reference's grasp point (their -0.100): the jaw
-# tip spheres straddle the site by +/-2.5 mm. At the old -0.092 the tips sat
+# The site sits at the jaw tips' level: the jaw
+# tip spheres straddle the site by +/-2.5 mm. At -0.092 the tips sat
 # 5.5-9 mm BELOW every site target, so each cataloged offset had to be 8 mm
-# higher — the gripper rode lower in the arm's envelope than the reference's,
+# higher — the gripper rode lower in the arm's envelope
 # and a lifted fork could not clear the drawer walls (measured).
 
 

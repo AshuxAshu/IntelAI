@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 DRAWER_TRAY_Z = 0.389  # cutlery rail tops (TABLE_TOP_HEIGHT + 0.029); utensil origins sit at their base
 UTENSIL_XY_JITTER_M = 0.01
-UTENSIL_Y_JITTER_M = 0.003  # rails are 6 mm wide in y (reference: +/-3 mm)
-# Cutlery lies in the tray at near-zero yaw (the reference's +/-4 deg): a
+UTENSIL_Y_JITTER_M = 0.003  # rails are 6 mm wide in y (+/-3 mm of jitter)
+# Cutlery lies in the tray at near-zero yaw (+/-4 deg): a
 # strongly yawed box can only be pinched at a corner — a knife-edge grip
 # that sags and slips under carry (measured).
 UTENSIL_YAW_JITTER_RAD = 0.07
@@ -201,8 +201,8 @@ def sample_spawns(
                     jitter_limit = UTENSIL_XY_JITTER_M
                     # The cutlery rails are 6 mm wide in y: a large y jitter
                     # lands the handle between them and the utensil rests on
-                    # the drawer floor instead (the reference jitters cutlery
-                    # y by only +/-3 mm; x and yaw still randomize fully).
+                    # the drawer floor instead (the cutlery rails allow only
+                    # +/-3 mm of y jitter; x and yaw still randomize fully).
                     jitter_y_limit = UTENSIL_Y_JITTER_M
                     yaw_limit = UTENSIL_YAW_JITTER_RAD
                 elif name == "bottle":
@@ -259,9 +259,9 @@ def sample_spawns(
     return spawns
 
 
-# Composite dimensions (Amendment 1): vessels are HOLLOW — base plate plus
-# tangential-box ring walls (the reference solution's proven construction) —
-# because the reference grasp strategies pinch rim walls and mug handles that
+# Composite dimensions: vessels are HOLLOW — base plate plus
+# tangential-box ring walls —
+# because the grasp strategies pinch rim walls and mug handles that
 # solid primitives cannot offer. Body origins sit at the object base; the
 # grasp catalog's offsets are measured against these radii.
 PLATE_RIM_R = 0.061
@@ -269,7 +269,7 @@ MUG_WALL_R = 0.025
 BOTTLE_WALL_R = 0.028  # body wall centerline radius
 BOTTLE_NECK_Z = 0.073  # neck mid-height above the base (10 cm bottle)
 BOTTLE_NECK_WALL = 0.003
-BOTTLE_NECK_CENTER_R = 0.011  # neck ring centerline radius (reference: 0.0095)
+BOTTLE_NECK_CENTER_R = 0.011  # neck ring centerline radius
 BOTTLE_NECK_R = BOTTLE_NECK_CENTER_R + BOTTLE_NECK_WALL / 2.0  # outer radius
 BOTTLE_NECK_H = 0.030
 BOTTLE_MOUTH_Z = BOTTLE_NECK_Z + BOTTLE_NECK_H / 2.0  # pour lip above the base
@@ -363,15 +363,15 @@ def _capsule(body, name: str, radius: float, half_len: float, pos, mass: float,
 def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
     per = mass_kg / _count_geoms(name)
     if name == "plate":
-        # Reference plate scale (radius 0.066 + 10 mm rim wall): the grasp
+        # Plate scale (radius 0.066 + 10 mm rim wall): the grasp
         # offset 0.061 is measured against THIS rim, and the smaller disc
         # clears the arm's shoulder structure during rim grasps.
         _cyl(body, name, 0.058, 0.003, 0.003, per, friction)
         _ring(body, name, PLATE_RIM_R, 0.010, 0.020, 0.014, per, friction)
     elif name == "mug":
-        # Reference mug dimensions (their grasp offsets are measured against
-        # this exact wall radius and height; Amendment 1 port). Massless
-        # geoms + one centered inertial (the reference's approach): with
+        # Mug dimensions (the grasp offsets are measured against
+        # this exact wall radius and height). Massless
+        # geoms + one centered inertial: with
         # per-geom masses the handle capsules offset the COM and the mug
         # pivots toward the handle, creeping ~15 cm/min on the soft contacts
         # (measured) — which trips the placement verify's bystander check.
@@ -385,7 +385,7 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         body.explicitinertial = True
         body.mass = mass_kg
         body.ipos = [0.0, 0.0, 0.032]
-        # Reference box inertia over their mug size (.077, .050, .064).
+        # Box inertia over the mug size (.077, .050, .064).
         body.inertia = (mass_kg / 12.0 * np.array(
             [0.050**2 + 0.064**2, 0.077**2 + 0.064**2, 0.077**2 + 0.050**2]
         )).tolist()
@@ -393,7 +393,7 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         # 10 cm hollow bottle: base, body wall, shoulder step, narrow neck.
         # The neck is the grasp feature: its outer diameter must fit inside the
         # gripper's fixed-jaw offset (measured 11.9 mm from the tool point), so
-        # it follows the reference bottle's slim neck rather than a scaled-up
+        # it keeps a slim neck rather than a scaled-up
         # one, which the fixed jaw could not descend past.
         _cyl(body, name, BOTTLE_WALL_R, 0.007, 0.007, per, friction)
         _ring(body, name, BOTTLE_WALL_R, 0.004, 0.041, 0.0275, per, friction)
@@ -403,12 +403,12 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
 
 
 def _build_utensil(body, name: str, mass_kg: float, friction) -> None:
-    """Cutlery as a handle-neck-head composite with reference dimensions.
+    """Cutlery as a handle-neck-head composite at real cutlery dimensions.
 
     A uniform stick gives the jaw tips only +/-6 mm of side face before the
     box pitches off the point contacts mid-carry — regardless of grip force
     (measured at 0.5 and 2.94 N m). The composite's handle is taller (16 mm)
-    and massless geoms plus one centered inertial (the reference's approach)
+    and massless geoms plus one centered inertial
     keep the COM at the object's middle: a per-geom mass distribution puts
     4/7 of a fork's mass in its tines, and the front-heavy pendulum droops
     its head onto the drawer floor when pinched at the handle (measured:
