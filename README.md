@@ -53,6 +53,11 @@ demonstrations, bounding boxes, and VQA pairs for free.
 <td align="center"><a href="https://github.com/qwenlm/qwen3-vl"><img src="assets/readme/tech_qwen3vl.png" width="256" height="75" alt="Qwen3-VL"></a><br><b>Qwen3-VL</b></td>
 <td align="center"><a href="https://github.com/open-edge-platform/physical-ai-studio"><img src="assets/readme/tech_physical_ai_studio.png" width="256" height="75" alt="Intel Physical AI Studio"></a><br><b>Intel Physical AI Studio</b></td>
 </tr>
+<tr>
+<td align="center"><a href="https://mujoco.readthedocs.io/"><img src="assets/readme/tech_mujoco.png" width="256" height="75" alt="MuJoCo"></a><br><b>MuJoCo</b></td>
+<td align="center"><a href="https://huggingface.co/lerobot"><img src="assets/readme/tech_lerobot.png" width="256" height="75" alt="LeRobot"></a><br><b>LeRobot</b></td>
+<td align="center"><a href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5LOldpTwcr_iQbfkOZ0ysRpO6QVkAswOV-_Kd_TFVSg&amp;s=10"><img src="assets/readme/tech_yolo11_ultralytics.png" width="256" height="75" alt="YOLO11n Ultralytics"></a><br><b>YOLO11n · Ultralytics</b></td>
+</tr>
 </table>
 
 ---
@@ -449,14 +454,3 @@ Apache-2.0 (MuJoCo Menagerie) and vendored with provenance. The reference
 approach in `example-approach/` (MIT) informed the scene geometry and grasp
 recipes; what was adopted and what was deliberately not adopted is documented in
 `docs/PLAN_AMENDMENTS.md`.
-
-## Documentation map
-
-| Document | Contents |
-| --- | --- |
-| [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) | Full end-to-end specification and phase plan |
-| [`docs/PLAN_AMENDMENTS.md`](docs/PLAN_AMENDMENTS.md) | Measured deviations from the plan, with evidence |
-| [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) | Optimization protocol and per-experiment verdicts |
-| [`docs/BENCHMARK.md`](docs/BENCHMARK.md) | Reproducing the OpenVINO matrix and reading the table |
-| [`docs/TRAINING_DIARY.md`](docs/TRAINING_DIARY.md) | Per-iteration training diagnosis log |
-| [`scripts/demo/README.md`](scripts/demo/README.md) | How the per-seed demonstration videos are built |
