@@ -19,6 +19,7 @@ import numpy as np
 from dinner_table.contracts.geometry import (
     DRAWER_TRAVEL,
     HOME_JOINTS,
+    PLACEMATS,
     TABLE_TOP_HEIGHT,
 )
 from dinner_table.executor.workspace import ZoneClaims, zone_of
@@ -515,27 +516,6 @@ class Place(Skill):
         except GraspCatalogError as exc:
             raise SkillFailed("place", "carry", "dropped") from exc
 
-    def _flatten_shift(self, obj_quat: np.ndarray) -> np.ndarray:
-        """Predicted horizontal shift when a leaning vessel rocks flat.
-
-        A tilted cylinder lands on its rim edge; flattening rotates the base
-        center toward the lean by radius*sin(tilt). Zero for objects without
-        a cataloged base radius (cutlery rolls negligibly).
-        """
-        target = self.target
-        if isinstance(target, dict):
-            if "point" in target:
-                return np.asarray(target["point"], dtype=np.float64)
-            target = RelativeTarget(relation=target["relation"], anchor=target["anchor"])
-        anchor_position = None
-        if isinstance(target, RelativeTarget):
-            anchor_position = ctx.object(target.anchor)[0]
-        try:
-            goal = goal_for_skill("place", self.object_name, None, target, anchor_position)
-        except (ValueError, KeyError) as exc:
-            raise SkillFailed("place", "carry", f"unknown target {self.target}") from exc
-        return np.array([goal[0], goal[1], PLACE_Z["table"]])
-
     def run(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
         if ctx.carrying.get(self.arm) != self.object_name:
             raise SkillFailed("place", "carry", "dropped")
@@ -637,19 +617,38 @@ class Place(Skill):
                 s_pos, _ = site_pose(ctx.data, f"{self.arm}.ee")
                 o_pos, _ = ctx.object(self.object_name)
                 samples.append(s_pos - o_pos)
-            # A leaning vessel is delivered short of the target by its
-            # predicted flatten shift so it settles ON the target when the
-            # release lets it rock flat. The last 2 mm is a deliberate
-            # press: an object delivered exactly to its rest height only
-            # grazes the surface with ~0 N support while the grip still
-            # carries its weight (measured on the fork). The offset is the
-            # MEDIAN across the swing — a mean is inflated by the pendulum
-            # extremes (measured: a swinging spoon produced an 8 cm offset
-            # and an unreachable descent target).
-            obj_quat = ctx.object(self.object_name)[1]
-            ee_end = (target + np.median(samples, axis=0)
-                      - self._flatten_shift(obj_quat)
-                      - np.array([0.0, 0.0, 0.002]))
+            # Deliver the GRASP POINT so the object lands on the target: the
+            # last 2 mm is a deliberate press, since an object delivered
+            # exactly to its rest height only grazes the surface with ~0 N
+            # support while the grip still carries its weight (measured on
+            # the fork). The offset is the MEDIAN across the swing — a mean
+            # is inflated by the pendulum extremes (measured: a swinging
+            # spoon produced an 8 cm offset and an unreachable descent
+            # target).
+            #
+            # A carried vessel hangs off the grasp point by several degrees
+            # (the lever is inherent to a rim or wall pinch), so the hanging
+            # offset sampled here is NOT the offset the object settles at:
+            # it rocks flat against the table DURING the descend, while
+            # still gripped, which swings its base center by up to 4 cm.
+            # Predicting that swing open-loop is what the earlier
+            # flatten-shift correction tried; measured against the physics
+            # it over-corrected by its own magnitude (predicted 22-41 mm of
+            # post-release settle where the real settle is under 1 mm — the
+            # object is already flat by the time it carries load). The
+            # descend is therefore closed-loop instead: seat, measure where
+            # the object actually landed, and re-seat on the residual.
+            hang_offset = np.median(samples, axis=0)
+            settled_offset = _flatten_rotation(ctx.object(self.object_name)[1]) @ hang_offset
+            # Horizontal from the settled (post-rock) offset, vertical from
+            # the hanging one less a 2 mm press: the descend stops on measured
+            # support, so an over-deep z target only means the last
+            # millimetre is a press rather than a graze.
+            ee_end = np.array([
+                target[0] + settled_offset[0],
+                target[1] + settled_offset[1],
+                target[2] + hang_offset[2] - 0.002,
+            ])
             try:
                 pts = ctx.plan_cartesian(self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0],
                                          ee_end, frame.approach, frame.lateral,

@@ -71,6 +71,19 @@ def _episode(seed: int, arms: dict[str, str | None], targets: dict[str, str],
     return outcomes, scene, ctx
 
 
+def _spawn_z(seed: int, name: str) -> float:
+    """The object's resting height on a fresh scene for this seed.
+
+    Measuring the lift needs the BEFORE height, which cannot be read off the
+    scene returned by ``_episode``: by then the pick has already moved the
+    object. Scenes are deterministic per seed, so a throwaway scene settled
+    the same way gives the baseline.
+    """
+    baseline = Scene(seed=seed, dr_profile="dr_train")
+    baseline.hold_safe()
+    return float(baseline.object_pose(name)[0][2])
+
+
 def _precondition(arms: dict[str, str | None], targets: dict[str, str]):
     return {"arms": arms, "targets": targets,
             "drawer": any(n.startswith(("fork", "spoon")) for n in arms)}
@@ -83,8 +96,8 @@ def test_pick_success_rate(name: str) -> None:
     ok = 0
     details = []
     for seed in SEEDS:
+        z0 = _spawn_z(seed, name)
         outcomes, scene, _ = _episode(seed, {name: arm}, {}, drawer_open=drawer)
-        z0 = scene.object_pose(name)[0][2]
         pos, _ = scene.object_pose(name)
         lifted = float(pos[2]) - z0
         success = name not in outcomes and lifted > 0.011

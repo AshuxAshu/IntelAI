@@ -12,6 +12,27 @@ ladder is FP16, then sensitivity-ranked mixed precision, then QAT; if the gate
 still fails, the aggressive configuration is rejected - the gate outranks the
 speedup.
 
+## Reproduce the matrix
+
+```sh
+uv run python scripts/benchmark_openvino.py        # or: make bench-ov
+```
+
+One command trains a checkpoint if none exists, exports the whole precision
+ladder, times every rung on CPU/iGPU/NPU, and gates each rung's actions against
+the FP32 reference. It writes `bench/ov_matrix/` (markdown + CSV + JSON) and
+prints the table. Output on a host without an NPU shows an explicit dash for that
+column rather than dropping it.
+
+**Honesty note on the success column.** The matrix's quality column is
+action-parity, not task success. A genuine closed-loop success column needs a
+learned policy driving the simulation, which does not exist yet: the demo runs
+are driven by privileged teacher skills, and the exported stand-in is the public
+PushT policy, not a dinner-table one. `--closed-loop teacher` records the
+teacher-oracle system smoke number and labels it precision-independent;
+`--closed-loop policy` is the seam that raises until the harness lands. Do not
+report the teacher number as quantization evidence.
+
 ## Experiment verdicts
 
 One row per optimization experiment. `latency delta` and `quality delta` are
@@ -38,6 +59,11 @@ Applied techniques are checked and reference their verdict rows above.
 - [ ] A9 Event-triggered perception (YOLO at 5-10 Hz or on demand)
 - [ ] A10 Hybrid-core pinning (physics + executor on P-cores, telemetry on E-cores)
 - [ ] A11 Reuse of physicalai InferenceLatencyBenchmark + RandomInputSource (bench)
+
+The precision ladder (FP32 / FP16 / INT8 weights / INT8 PTQ) and its per-device
+latency matrix are produced by `scripts/benchmark_openvino.py`; the action-parity
+gates it enforces are the INT8_NORMALIZED_MSE / relative-error limits in
+`src/dinner_table/bench/ov_matrix.py`, matching `test_quant_parity`'s thresholds.
 
 ### Tier B - heterogeneous and advanced (P1)
 

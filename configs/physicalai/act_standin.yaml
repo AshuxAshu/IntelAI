@@ -1,0 +1,25 @@
+# configs/physicalai/act_standin.yaml - the benchmark stand-in checkpoint.
+# Consumed by `physicalai fit` (jsonargparse format) when the OpenVINO
+# optimization matrix finds no checkpoint: it streams the small public
+# lerobot/pusht episodes so a fresh clone can reproduce the table before the
+# dinner dataset exists. No `data.init_args.root`, so preflight streams from the
+# hub instead of looking for a local LeRobot directory.
+#
+# This is NOT the dinner-table policy: only the architecture and the export
+# pipeline are shared. Point --ckpt at a real dinner checkpoint to benchmark
+# the deployed policy instead.
+model:
+  class_path: physicalai.policies.ACT
+  init_args: {chunk_size: 25, n_action_steps: 25, image_size: [224, 224], use_vae: true, optimizer_lr: 2.5e-4}
+data:
+  class_path: physicalai.data.lerobot.LeRobotDataModule
+  init_args:
+    repo_id: lerobot/pusht
+    data_format: physicalai
+    train_batch_size: 8
+    episodes: [0, 1, 2]
+    video_backend: pyav
+trainer:
+  accelerator: cpu
+  devices: 1
+  max_steps: 50          # overridden to 50 by studio_train --smoke as well

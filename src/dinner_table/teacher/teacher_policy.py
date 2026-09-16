@@ -288,7 +288,7 @@ def run_graph(scene, graph: TaskGraph, seed: int) -> EpisodeLog:
                                     attempt, phase, cause)
                 if attempt > MAX_STEP_RETRIES:
                     break
-                if not _recover(ctx, log, arms, primary):
+                if not _recover(ctx, log, arms):
                     break
                 continue
             record = StepRecord(primary.id, primary.skill, primary.arm, "success", attempt)

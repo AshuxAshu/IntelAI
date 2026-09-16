@@ -1,0 +1,341 @@
+{
+  "schema": "ov-matrix/1.0",
+  "host": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-13620H",
+    "devices": [
+      "CPU",
+      "GPU.0",
+      "GPU.1"
+    ],
+    "device_properties": {
+      "CPU": {
+        "FULL_DEVICE_NAME": "13th Gen Intel(R) Core(TM) i7-13620H",
+        "DEVICE_TYPE": "INTEGRATED",
+        "DEVICE_ARCHITECTURE": "intel64",
+        "OPTIMIZATION_CAPABILITIES": [
+          "FP32",
+          "INT8",
+          "BIN",
+          "EXPORT_IMPORT"
+        ],
+        "RANGE_FOR_STREAMS": [
+          1,
+          16
+        ]
+      },
+      "GPU.0": {
+        "FULL_DEVICE_NAME": "Intel(R) UHD Graphics (iGPU)",
+        "DEVICE_TYPE": "INTEGRATED",
+        "DEVICE_ARCHITECTURE": "GPU: vendor=0x8086 arch=v12.3.0",
+        "OPTIMIZATION_CAPABILITIES": [
+          "FP32",
+          "BIN",
+          "FP16",
+          "INT8",
+          "GPU_USM_MEMORY",
+          "EXPORT_IMPORT"
+        ],
+        "GPU_EXECUTION_UNITS_COUNT": 64,
+        "GPU_DEVICE_TOTAL_MEM_SIZE": 14922547200,
+        "RANGE_FOR_STREAMS": [
+          1,
+          2
+        ]
+      },
+      "GPU.1": {
+        "FULL_DEVICE_NAME": "NVIDIA GeForce RTX 4050 Laptop GPU (dGPU)",
+        "DEVICE_TYPE": "DISCRETE",
+        "DEVICE_ARCHITECTURE": "GPU: vendor=0x10de arch=v8.9.0",
+        "OPTIMIZATION_CAPABILITIES": [
+          "FP32",
+          "BIN",
+          "INT8",
+          "EXPORT_IMPORT"
+        ],
+        "GPU_EXECUTION_UNITS_COUNT": 20,
+        "GPU_DEVICE_TOTAL_MEM_SIZE": 6081347584,
+        "RANGE_FOR_STREAMS": [
+          1,
+          2
+        ]
+      }
+    },
+    "power_profile": null,
+    "ram_total_gb": 15.25,
+    "physicalai": "0.1.1",
+    "physicalai_train": "0.1.0",
+    "openvino": "2026.1.0",
+    "nncf": "3.3.0",
+    "npu_available": false,
+    "os": "Linux-7.2.2-1-cachyos-x86_64-with-glibc2.44",
+    "timestamp_utc": "2026-09-16T16:16:16.466673+00:00"
+  },
+  "devices": {
+    "CPU": "CPU",
+    "iGPU": "GPU.0",
+    "NPU": null
+  },
+  "extra_devices": [
+    "GPU.1"
+  ],
+  "checkpoint": "artifacts/act_public/experiments/lightning_logs/version_0/checkpoints/epoch=0-step=50.ckpt",
+  "notes": [
+    "NPU is not available on this host",
+    "the action-parity column is each rung against the OpenVINO FP32 reference on identical inputs; it is the quantization-quality check, not a task-success rate",
+    "checkpoint: artifacts/act_public/experiments/lightning_logs/version_0/checkpoints/epoch=0-step=50.ckpt",
+    "inputs: state[1, 2], images[1, 3, 224, 224]"
+  ],
+  "rows": [
+    {
+      "label": "PyTorch FP32",
+      "backend": "pytorch",
+      "precision": "FP32",
+      "variant": "pytorch",
+      "model_size_bytes": null,
+      "weights": null,
+      "activations": null,
+      "rel_error_vs_fp32": 1.8898835016287784e-07,
+      "normalized_mse_vs_fp32": 2.0798056610338524e-14,
+      "rel_error_vs_pytorch": null,
+      "cells": {
+        "CPU": {
+          "device_id": "CPU",
+          "latency_ms": {
+            "p50": 38.599,
+            "p90": 43.649,
+            "p95": 45.332,
+            "p99": 49.539
+          },
+          "throughput_ips": 25.87,
+          "cold_compile_s": 0.6,
+          "rss_delta_mb": 26.0,
+          "num_iters": 200,
+          "error": ""
+        },
+        "iGPU": {
+          "device_id": "GPU.0",
+          "latency_ms": null,
+          "throughput_ips": null,
+          "cold_compile_s": null,
+          "rss_delta_mb": null,
+          "num_iters": null,
+          "error": "not measured"
+        },
+        "NPU": {
+          "device_id": null,
+          "latency_ms": null,
+          "throughput_ips": null,
+          "cold_compile_s": null,
+          "rss_delta_mb": null,
+          "num_iters": null,
+          "error": "not measured"
+        }
+      }
+    },
+    {
+      "label": "OpenVINO FP32",
+      "backend": "openvino",
+      "precision": "FP32",
+      "variant": "fp32",
+      "model_size_bytes": 137195419,
+      "weights": "FP32",
+      "activations": "FP32",
+      "rel_error_vs_fp32": 0.0,
+      "normalized_mse_vs_fp32": 0.0,
+      "rel_error_vs_pytorch": 1.889883519897323e-07,
+      "cells": {
+        "CPU": {
+          "device_id": "CPU",
+          "latency_ms": {
+            "p50": 24.429,
+            "p90": 30.953,
+            "p95": 32.76,
+            "p99": 37.492
+          },
+          "throughput_ips": 40.38,
+          "cold_compile_s": 0.27,
+          "rss_delta_mb": 288.1,
+          "num_iters": 200,
+          "error": ""
+        },
+        "iGPU": {
+          "device_id": "GPU.0",
+          "latency_ms": {
+            "p50": 46.423,
+            "p90": 88.99,
+            "p95": 113.596,
+            "p99": 121.518
+          },
+          "throughput_ips": 20.98,
+          "cold_compile_s": 0.87,
+          "rss_delta_mb": 160.8,
+          "num_iters": 200,
+          "error": ""
+        },
+        "NPU": {
+          "device_id": null,
+          "latency_ms": null,
+          "throughput_ips": null,
+          "cold_compile_s": null,
+          "rss_delta_mb": null,
+          "num_iters": null,
+          "error": "absent"
+        }
+      }
+    },
+    {
+      "label": "OpenVINO FP16",
+      "backend": "openvino",
+      "precision": "FP16",
+      "variant": "fp16",
+      "model_size_bytes": 68914987,
+      "weights": "FP16",
+      "activations": "FP32",
+      "rel_error_vs_fp32": 0.0002130048277396075,
+      "normalized_mse_vs_fp32": 3.740166957944262e-08,
+      "rel_error_vs_pytorch": 0.00021302981963235704,
+      "cells": {
+        "CPU": {
+          "device_id": "CPU",
+          "latency_ms": {
+            "p50": 30.028,
+            "p90": 35.684,
+            "p95": 37.554,
+            "p99": 40.86
+          },
+          "throughput_ips": 32.8,
+          "cold_compile_s": 0.3,
+          "rss_delta_mb": 226.2,
+          "num_iters": 200,
+          "error": ""
+        },
+        "iGPU": {
+          "device_id": "GPU.0",
+          "latency_ms": {
+            "p50": 51.337,
+            "p90": 88.807,
+            "p95": 92.241,
+            "p99": 97.653
+          },
+          "throughput_ips": 19.19,
+          "cold_compile_s": 0.76,
+          "rss_delta_mb": 26.0,
+          "num_iters": 200,
+          "error": ""
+        },
+        "NPU": {
+          "device_id": null,
+          "latency_ms": null,
+          "throughput_ips": null,
+          "cold_compile_s": null,
+          "rss_delta_mb": null,
+          "num_iters": null,
+          "error": "absent"
+        }
+      }
+    },
+    {
+      "label": "OpenVINO INT8 (NNCF)",
+      "backend": "openvino",
+      "precision": "INT8",
+      "variant": "int8_ptq",
+      "model_size_bytes": 39223292,
+      "weights": "INT8",
+      "activations": "FP32",
+      "rel_error_vs_fp32": 0.0074320920145167085,
+      "normalized_mse_vs_fp32": 4.167359792515907e-05,
+      "rel_error_vs_pytorch": 0.007432076913288316,
+      "cells": {
+        "CPU": {
+          "device_id": "CPU",
+          "latency_ms": {
+            "p50": 10.265,
+            "p90": 13.086,
+            "p95": 14.074,
+            "p99": 16.285
+          },
+          "throughput_ips": 94.95,
+          "cold_compile_s": 0.53,
+          "rss_delta_mb": 106.0,
+          "num_iters": 200,
+          "error": ""
+        },
+        "iGPU": {
+          "device_id": "GPU.0",
+          "latency_ms": {
+            "p50": 35.136,
+            "p90": 45.698,
+            "p95": 48.818,
+            "p99": 52.522
+          },
+          "throughput_ips": 28.52,
+          "cold_compile_s": 1.01,
+          "rss_delta_mb": 38.3,
+          "num_iters": 200,
+          "error": ""
+        },
+        "NPU": {
+          "device_id": null,
+          "latency_ms": null,
+          "throughput_ips": null,
+          "cold_compile_s": null,
+          "rss_delta_mb": null,
+          "num_iters": null,
+          "error": "absent"
+        }
+      }
+    },
+    {
+      "label": "OpenVINO INT8 weights",
+      "backend": "openvino",
+      "precision": "INT8",
+      "variant": "int8_weights",
+      "model_size_bytes": 35129687,
+      "weights": "UINT8",
+      "activations": "FP32",
+      "rel_error_vs_fp32": 0.0030716399604020714,
+      "normalized_mse_vs_fp32": 3.003967208927693e-06,
+      "rel_error_vs_pytorch": 0.0030716502079542935,
+      "cells": {
+        "CPU": {
+          "device_id": "CPU",
+          "latency_ms": {
+            "p50": 23.292,
+            "p90": 27.482,
+            "p95": 29.098,
+            "p99": 31.85
+          },
+          "throughput_ips": 42.77,
+          "cold_compile_s": 0.39,
+          "rss_delta_mb": 192.2,
+          "num_iters": 200,
+          "error": ""
+        },
+        "iGPU": {
+          "device_id": "GPU.0",
+          "latency_ms": {
+            "p50": 83.85,
+            "p90": 93.774,
+            "p95": 95.941,
+            "p99": 98.724
+          },
+          "throughput_ips": 12.55,
+          "cold_compile_s": 0.94,
+          "rss_delta_mb": 24.9,
+          "num_iters": 200,
+          "error": ""
+        },
+        "NPU": {
+          "device_id": null,
+          "latency_ms": null,
+          "throughput_ips": null,
+          "cold_compile_s": null,
+          "rss_delta_mb": null,
+          "num_iters": null,
+          "error": "absent"
+        }
+      }
+    }
+  ],
+  "closed_loop": null
+}
