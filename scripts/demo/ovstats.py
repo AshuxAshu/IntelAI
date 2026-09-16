@@ -80,7 +80,9 @@ class LiveOpenvino:
                     1, self._psutil.cpu_count(logical=True) or 1
                 )
                 self.last_rss_mb = self._proc.memory_info().rss / (1024 * 1024)
-            except Exception:  # noqa: BLE001
+            except (AttributeError, OSError):
+                # psutil can lose the process (containers, races); telemetry is
+                # optional and must never break a render, so keep the last value.
                 pass
         if not self.available:
             return
