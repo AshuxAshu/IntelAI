@@ -6,13 +6,11 @@
 
 ## Demo
 
-<video src="assets/demo/end_to_end_seed5.mp4" controls autoplay muted loop playsinline width="100%">
-  <a href="assets/demo/end_to_end_seed5.mp4">Watch the demo video</a>
-</video>
+[![End-to-end table setting for Seed-5](assets/demo/end_to_end_seed5.gif)](assets/demo/end_to_end_seed5.mp4)
 
 **End-to-end table setting for Seed-5**
 
-[Watch or download the video](assets/demo/end_to_end_seed5.mp4)
+▶ **[Watch the full demo video](assets/demo/end_to_end_seed5.mp4)**
 
 ---
 
