@@ -237,6 +237,16 @@ class Executor:
                 )
         return arr
 
+    def hold_safe(self) -> np.ndarray:
+        """Safe-hold action for disconnect/abort: current joints clamped to
+        limits, or zeros (in-limits mid-pose) before the first tick."""
+        if self._joints is None:
+            return np.zeros(12, dtype=np.float64)
+        return np.array(
+            [min(max(v, lo), hi) for v, (lo, hi) in zip(self._joints, SAFE_JOINT_LIMITS)],
+            dtype=np.float64,
+        )
+
     def done(self) -> bool:
         return self._mode == "terminal"
 
