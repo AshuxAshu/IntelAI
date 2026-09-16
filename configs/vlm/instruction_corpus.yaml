@@ -1,0 +1,421 @@
+# A14 instruction corpus: the full §3.3 corpus as structured YAML.
+# Split is at template level (entries inherit their template's split).
+# graph.steps entries are Step kwargs; refusals carry the exact message.
+templates:
+  - id: open-drawer
+    split: train
+    entries:
+      - id: open-drawer-0
+        text: "open the drawer"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: open_drawer, arm: A, object: drawer_top}
+      - id: open-drawer-1
+        text: "please open the top drawer"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: open_drawer, arm: A, object: drawer_top}
+      - id: open-drawer-2
+        text: "Open The Drawer"
+        paraphrase_of: open-drawer-0
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: open_drawer, arm: A, object: drawer_top}
+      - id: open-drawer-3
+        text: "open the drawer."
+        paraphrase_of: open-drawer-0
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: open_drawer, arm: A, object: drawer_top}
+
+  - id: set-table
+    split: train
+    entries:
+      - id: set-table-0
+        text: "set the table"
+        graph:
+          task_id: fallback
+          steps: &settable
+            - {id: 1, skill: open_drawer, arm: A, object: drawer_top}
+            - {id: 2, skill: pick, arm: A, object: plate}
+            - {id: 3, skill: place, arm: A, object: plate, target: placemat_1}
+            - {id: 4, skill: pick, arm: A, object: fork_1}
+            - {id: 5, skill: place, arm: A, object: fork_1, target: {relation: left_of, anchor: plate}}
+            - {id: 6, skill: pick, arm: A, object: spoon_1}
+            - {id: 7, skill: place, arm: A, object: spoon_1, target: {relation: left_of, anchor: fork_1}}
+            - {id: 8, skill: close_drawer, arm: A, object: drawer_top}
+            - {id: 9, skill: pick, arm: A, object: bottle}
+            - {id: 10, skill: handoff, arm: A, object: bottle, target: hand_of_B}
+            - {id: 11, skill: handoff, arm: B, object: bottle, target: hand_of_A}
+            - {id: 12, skill: pick, arm: B, object: mug}
+            - {id: 13, skill: hold, arm: B, object: mug, parallel_group: 1}
+            - {id: 14, skill: pour, arm: A, object: bottle, target: mug, amount: 0.6, parallel_group: 1}
+            - {id: 15, skill: place, arm: B, object: mug, target: placemat_2}
+      - id: set-table-1
+        text: "deck den tisch"
+        paraphrase_of: set-table-0
+        graph:
+          task_id: fallback
+          steps: *settable
+
+  - id: pick-place-default
+    split: train
+    entries:
+      - id: pick-place-default-0
+        text: "place the plate"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_1}
+      - id: pick-place-default-1
+        text: "pick up the mug"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: mug}
+            - {id: 2, skill: place, arm: A, object: mug, target: placemat_2}
+      - id: pick-place-default-2
+        text: "take the fork"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: fork_1}
+            - {id: 2, skill: place, arm: A, object: fork_1, target: {relation: left_of, anchor: plate}}
+      - id: pick-place-default-3
+        text: "bring the spoon"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: spoon_1}
+            - {id: 2, skill: place, arm: A, object: spoon_1, target: {relation: left_of, anchor: fork_1}}
+      - id: pick-place-default-4
+        text: "take the bottle"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: bottle}
+
+  - id: spots
+    split: train
+    entries:
+      - id: spots-0
+        text: "put the plate on the left spot"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_1}
+      - id: spots-1
+        text: "place the mug on the right side"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: mug}
+            - {id: 2, skill: place, arm: A, object: mug, target: placemat_2}
+      - id: spots-2
+        text: "move the bottle to the left setting"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: bottle}
+            - {id: 2, skill: place, arm: A, object: bottle, target: placemat_1}
+      - id: spots-3
+        text: "pick up the plate on the left side"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_1}
+
+  - id: relative
+    split: train
+    entries:
+      - id: relative-0
+        text: "put a fork beside the plate"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: fork_1}
+            - {id: 2, skill: place, arm: A, object: fork_1, target: {relation: beside, anchor: plate}}
+      - id: relative-1
+        text: "put the mug to the right of the plate"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: mug}
+            - {id: 2, skill: place, arm: A, object: mug, target: {relation: right_of, anchor: plate}}
+      - id: relative-2
+        text: "place the spoon to the left of the mug"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: spoon_1}
+            - {id: 2, skill: place, arm: A, object: spoon_1, target: {relation: left_of, anchor: mug}}
+      - id: relative-3
+        text: "put the bottle beside the mug"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: bottle}
+            - {id: 2, skill: place, arm: A, object: bottle, target: {relation: beside, anchor: mug}}
+      - id: relative-4
+        text: "move fork_2 to the right of the plate"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: fork_2}
+            - {id: 2, skill: place, arm: A, object: fork_2, target: {relation: right_of, anchor: plate}}
+      - id: relative-5
+        text: "put the spoon next to the plate"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: spoon_1}
+            - {id: 2, skill: place, arm: A, object: spoon_1, target: {relation: beside, anchor: plate}}
+      - id: relative-6
+        text: "place the mug to the left of the bottle"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: mug}
+            - {id: 2, skill: place, arm: A, object: mug, target: {relation: left_of, anchor: bottle}}
+      - id: relative-7
+        text: "put the plate to the right of the mug"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: {relation: right_of, anchor: mug}}
+
+  - id: handoff
+    split: val
+    entries:
+      - id: handoff-0
+        text: "pass the bottle to the left arm"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: B, object: bottle}
+            - {id: 2, skill: handoff, arm: B, object: bottle, target: hand_of_A}
+      - id: handoff-1
+        text: "hand the mug to the right arm with the left arm"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: mug}
+            - {id: 2, skill: handoff, arm: A, object: mug, target: hand_of_B}
+      - id: handoff-2
+        text: "transfer the plate to the right arm"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: handoff, arm: A, object: plate, target: hand_of_B}
+
+  - id: transcript
+    split: train
+    entries:
+      - id: transcript-0
+        text: "uh, pick up the, um, plate"
+        paraphrase_of: pick-place-default-0
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_1}
+      - id: transcript-1
+        text: "Please, put the fork beside the plate!"
+        paraphrase_of: relative-0
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: fork_1}
+            - {id: 2, skill: place, arm: A, object: fork_1, target: {relation: beside, anchor: plate}}
+      - id: transcript-2
+        text: "UM, OPEN THE DRAWER"
+        paraphrase_of: open-drawer-0
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: open_drawer, arm: A, object: drawer_top}
+      - id: transcript-3
+        text: "pass the bottle, um, to the left arm"
+        paraphrase_of: handoff-0
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: B, object: bottle}
+            - {id: 2, skill: handoff, arm: B, object: bottle, target: hand_of_A}
+      - id: transcript-4
+        text: "pick up. The plate"
+        paraphrase_of: pick-place-default-0
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_1}
+      - id: transcript-5
+        text: "uh, transfer the mug to arm B, please"
+        paraphrase_of: handoff-1
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: mug}
+            - {id: 2, skill: handoff, arm: A, object: mug, target: hand_of_B}
+      - id: transcript-6
+        text: "er, place the teller on the, um, left spot"
+        paraphrase_of: spots-0
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_1}
+
+  - id: multi-clause
+    split: train
+    entries:
+      - id: multi-clause-0
+        text: "open the drawer then pick up the plate"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: open_drawer, arm: A, object: drawer_top}
+            - {id: 2, skill: pick, arm: A, object: plate}
+            - {id: 3, skill: place, arm: A, object: plate, target: placemat_1}
+      - id: multi-clause-1
+        text: "pick up the plate then place it on the left spot"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_1}
+            - {id: 3, skill: pick, arm: A, object: plate}
+            - {id: 4, skill: place, arm: A, object: plate, target: placemat_1}
+      - id: multi-clause-2
+        text: "take the fork out of the drawer and put it beside the plate"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: fork_1}
+            - {id: 2, skill: place, arm: A, object: fork_1, target: {relation: beside, anchor: plate}}
+      - id: multi-clause-3
+        text: "open the top drawer and then place the mug on the right spot"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: open_drawer, arm: A, object: drawer_top}
+            - {id: 2, skill: pick, arm: A, object: mug}
+            - {id: 3, skill: place, arm: A, object: mug, target: placemat_2}
+
+  - id: drawer-utensil
+    split: train
+    entries:
+      - id: drawer-utensil-0
+        text: "take the fork out of the drawer"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: fork_1}
+            - {id: 2, skill: place, arm: A, object: fork_1, target: {relation: left_of, anchor: plate}}
+      - id: drawer-utensil-1
+        text: "bring the spoon from the drawer"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: spoon_1}
+            - {id: 2, skill: place, arm: A, object: spoon_1, target: {relation: left_of, anchor: fork_1}}
+
+  - id: german
+    split: val
+    entries:
+      - id: german-0
+        text: "put the flasche on the left spot"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: bottle}
+            - {id: 2, skill: place, arm: A, object: bottle, target: placemat_1}
+      - id: german-1
+        text: "place the teller on the right setting"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_2}
+      - id: german-2
+        text: "pick up die gabel"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: fork_1}
+            - {id: 2, skill: place, arm: A, object: fork_1, target: {relation: left_of, anchor: plate}}
+
+  - id: arm-spec
+    split: train
+    entries:
+      - id: arm-spec-0
+        text: "pick up the plate with the left arm"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: A, object: plate}
+            - {id: 2, skill: place, arm: A, object: plate, target: placemat_1}
+      - id: arm-spec-1
+        text: "pick up the mug with arm B"
+        graph:
+          task_id: fallback
+          steps:
+            - {id: 1, skill: pick, arm: B, object: mug}
+            - {id: 2, skill: place, arm: B, object: mug, target: placemat_2}
+
+  - id: negatives-train
+    split: train
+    entries:
+      - id: neg-train-0
+        text: "don't move the plate"
+        refuse: "Negated movement instructions are not executed. Say stop to cancel."
+      - id: neg-train-1
+        text: "close the drawer"
+        refuse: "Try “place the plate”, “open the drawer”, or “put the bottle in front of the right plate”."
+      - id: neg-train-2
+        text: "pick up the glass"
+        refuse: "Unknown object: glass."
+      - id: neg-train-3
+        text: "move the banana"
+        refuse: "Name the item to move."
+      - id: neg-train-4
+        text: "put the plate under the table"
+        refuse: "That spatial relation is not supported."
+      - id: neg-train-5
+        text: "put the plate in front of the mug"
+        refuse: "Only left/right/beside placements are supported."
+      - id: neg-train-6
+        text: "put the plate behind the mug"
+        refuse: "Only left/right/beside placements are supported."
+      - id: neg-train-7
+        text: "place the mug on the center spot"
+        refuse: "Only left/right spots are supported."
+      - id: neg-train-8
+        text: "put the plate next to the plate"
+        refuse: "The destination must refer to another item."
+      - id: neg-train-9
+        text: "take the plate and put the mug"
+        refuse: "Separate different movements with “then”."
+
+  - id: negatives-val
+    split: val
+    entries:
+      - id: neg-val-0
+        text: "dance with the plate"
+        refuse: "Try “place the plate”, “open the drawer”, or “put the bottle in front of the right plate”."
+      - id: neg-val-1
+        text: "never touch the mug"
+        refuse: "Negated movement instructions are not executed. Say stop to cancel."
+      - id: neg-val-2
+        text: "place the plate then place the mug then take the fork then bring the spoon then move the bottle then pick up the plate then place the mug then take the fork then bring the spoon"
+        refuse: "Use at most eight task steps."
