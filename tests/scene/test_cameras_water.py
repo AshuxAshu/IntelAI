@@ -11,9 +11,9 @@ from dinner_table.scene.cameras import CameraRig, resize_overhead_policy
 import dinner_table.scene.water as water
 
 EXTENTS = {
-    "plate": (0.09, 0.012),
-    "mug": (0.04, 0.04),
-    "bottle": (0.035, 0.10),
+    "plate": (0.066, 0.012),
+    "mug": (0.025, 0.032),
+    "bottle": (0.030, 0.045),
 }
 
 

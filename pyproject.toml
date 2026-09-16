@@ -3,7 +3,7 @@ name = "dinner_table"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "mujoco==3.2.*",
+  "mujoco==3.2.7",
   "numpy>=1.26",
   "pydantic==2.*",
   "pillow>=10",
@@ -58,6 +58,7 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
   "fast: quick unit tests (every push)",
   "slow: integration tests (every push, < 15 min)",

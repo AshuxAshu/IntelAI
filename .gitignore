@@ -17,6 +17,9 @@ uv.lock.mergebackup
 # root-anchored so the pattern cannot swallow configs/physicalai/
 /physical-ai-studio/
 /physicalai/
+/example-approach/
+# local notes/transcripts from mentor sessions (exploration material, not project code)
+Mentor Discussion.txt
 Problem Statement.md
 IMPLEMENTATION_PLAN.md
 docs/IMPLEMENTATION_PLAN.md

@@ -1,14 +1,14 @@
 <mujocoinclude>
   <!-- Tabletop, legs, and arm mounting platforms -->
   <body name="table" pos="0 0 0">
-    <geom name="table_top_col" type="box" size="0.45 0.25 0.18" pos="0 0 0.18" class="furniture"/>
-    <geom name="table_leg_1" type="box" size="0.02 0.02 0.17" pos="0.41 0.21 0.17" class="furniture"/>
-    <geom name="table_leg_2" type="box" size="0.02 0.02 0.17" pos="-0.41 0.21 0.17" class="furniture"/>
-    <geom name="table_leg_3" type="box" size="0.02 0.02 0.17" pos="0.41 -0.21 0.17" class="furniture"/>
-    <geom name="table_leg_4" type="box" size="0.02 0.02 0.17" pos="-0.41 -0.21 0.17" class="furniture"/>
+    <geom name="table_top_col" type="box" size="0.48 0.39 0.18" pos="0 0 0.18" class="furniture"/>
+    <geom name="table_leg_1" type="box" size="0.02 0.02 0.17" pos="0.44 0.35 0.17" class="furniture"/>
+    <geom name="table_leg_2" type="box" size="0.02 0.02 0.17" pos="-0.44 0.35 0.17" class="furniture"/>
+    <geom name="table_leg_3" type="box" size="0.02 0.02 0.17" pos="0.44 -0.35 0.17" class="furniture"/>
+    <geom name="table_leg_4" type="box" size="0.02 0.02 0.17" pos="-0.44 -0.35 0.17" class="furniture"/>
 
-    <!-- Arm mounting blocks at ARM_MOUNTS["A"]=(0.45, 0, 0.36) and ARM_MOUNTS["B"]=(-0.45, 0, 0.36) -->
-    <geom name="arm_mount_A_geom" type="box" size="0.08 0.08 0.01" pos="0.45 0 0.35" class="furniture"/>
-    <geom name="arm_mount_B_geom" type="box" size="0.08 0.08 0.01" pos="-0.45 0 0.35" class="furniture"/>
+    <!-- Arm mounting pads under ARM_MOUNTS["A"]=(-0.25, -0.305, 0.378) and ARM_MOUNTS["B"]=(0.25, -0.305, 0.378) -->
+    <geom name="arm_mount_A_geom" type="box" size="0.058 0.055 0.009" pos="-0.25 -0.305 0.369" class="furniture"/>
+    <geom name="arm_mount_B_geom" type="box" size="0.058 0.055 0.009" pos="0.25 -0.305 0.369" class="furniture"/>
   </body>
 </mujocoinclude>

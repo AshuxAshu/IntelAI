@@ -433,7 +433,7 @@ requires-dist = [
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4" },
     { name = "lerobot", extras = ["dataset"], specifier = ">=0.5.1,<0.6" },
     { name = "loguru", specifier = ">=0.7" },
-    { name = "mujoco", specifier = "==3.2.*" },
+    { name = "mujoco", specifier = "==3.2.7" },
     { name = "nncf", marker = "sys_platform != 'darwin'", specifier = ">=3.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "onnxslim", specifier = ">=0.1.71" },
