@@ -104,10 +104,17 @@ class Scene:
         self.model = self.spec.compile()
         self.data = mujoco.MjData(self.model)
 
-        self.camera_rig = CameraRig(self.model)
+        self._camera_rig: CameraRig | None = None
 
         self.reset()
         self.ready = True
+
+    @property
+    def camera_rig(self) -> CameraRig:
+        """Offscreen render rig, built on first use so physics flows need no GL context."""
+        if self._camera_rig is None:
+            self._camera_rig = CameraRig(self.model)
+        return self._camera_rig
 
     def _attach_cameras(self, spec: mujoco.MjSpec) -> None:
         """Attach overhead and demo cameras to the worldbody."""

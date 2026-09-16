@@ -19,11 +19,17 @@ import pytest
 from dinner_table.contracts.geometry import HOME_JOINTS, TABLE_TOP_HEIGHT
 from dinner_table.executor.workspace import zone_of
 from dinner_table.scene.builder import Scene
-from dinner_table.scene.objects import BOTTLE_MOUTH_Z, MUG_INNER_R, MUG_RIM_Z
+from dinner_table.scene.objects import (
+    BOTTLE_MOUTH_Z,
+    MUG_INNER_R,
+    MUG_RIM_Z,
+    MUG_WALL_R,
+    PLATE_RIM_R,
+)
 from dinner_table.teacher.context import SkillFailed, TeacherContext
 from dinner_table.teacher.ik import IKUnreachable
 from dinner_table.teacher.kinematics import arm_q, site_pose
-from dinner_table.teacher.skills import Handoff, Hold, ParallelGroup, Pick, Pour
+from dinner_table.teacher.skills import Handoff, Hold, ParallelGroup, Pick, Place, Pour
 
 pytestmark = pytest.mark.slow
 SEEDS = tuple(range(20))
@@ -227,6 +233,29 @@ def _pour_episode(seed: int, mass_scale: float, held: bool) -> Episode:
         del audit, ctx, scene
         gc.collect()
     return result
+
+
+def test_pour_station_feasible() -> None:
+    """Seed 1's staging transit must dry-plan and execute at the chosen station."""
+    result = Episode()
+    scene = _scene(1, 0.5)
+    ctx = TeacherContext(scene)
+    ctx.begin(180.0)
+    audit = PhysicsAudit(ctx, result)
+    try:
+        audit.drive(Pick("A", "bottle"))
+        audit.drive(Place("A", "bottle", (0.04, -0.02)))
+        audit.drive(Pick("B", "mug"))
+        plate_pos, _ = ctx.object("plate")
+        clearance = PLATE_RIM_R + MUG_WALL_R + 0.035
+        base = np.array([0.0, plate_pos[1] - np.sqrt(max(0.0, clearance**2 - plate_pos[0] ** 2))])
+        station = Pour("A")._choose_station(ctx, "B", base, clearance, plate_pos)
+        assert Place("B", "mug", station).feasible_align_height(ctx) is not None
+        audit.drive(Place("B", "mug", station))
+        assert not result.collisions
+    finally:
+        del audit, ctx, scene
+        gc.collect()
 
 
 def test_relay_success_rate() -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import mujoco
 import numpy as np
@@ -13,7 +13,9 @@ from dinner_table.contracts.geometry import CABINET_X, CABINET_Y, TABLE_TOP_HEIG
 
 logger = logging.getLogger(__name__)
 
-DRAWER_TRAY_Z = 0.389  # cutlery rail tops (TABLE_TOP_HEIGHT + 0.029); utensil origins sit at their base
+DRAWER_TRAY_Z = (
+    0.389  # cutlery rail tops (TABLE_TOP_HEIGHT + 0.029); utensil origins sit at their base
+)
 UTENSIL_XY_JITTER_M = 0.01
 UTENSIL_Y_JITTER_M = 0.003  # rails are 6 mm wide in y (+/-3 mm of jitter)
 # Cutlery lies in the tray at near-zero yaw (+/-4 deg): a
@@ -56,6 +58,7 @@ class DrProfile:
     perturb_event_probability: float = 0.35
     holdout_textures: bool = False
     seed: int | None = None
+    object_mass_scale: dict[str, tuple[float, float]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -299,8 +302,9 @@ def _count_geoms(name: str) -> int:
     return 1
 
 
-def _box(body, name: str, half_x: float, half_y: float, half_z: float,
-         pos, mass: float, friction) -> None:
+def _box(
+    body, name: str, half_x: float, half_y: float, half_z: float, pos, mass: float, friction
+) -> None:
     body.add_geom(
         type=mujoco.mjtGeom.mjGEOM_BOX,
         size=np.array([half_x, half_y, half_z], dtype=np.float64),
@@ -312,8 +316,17 @@ def _box(body, name: str, half_x: float, half_y: float, half_z: float,
     )
 
 
-def _ring(body, name: str, radius: float, thickness: float, height: float,
-          z: float, mass_each: float, friction, segments: int = 24) -> None:
+def _ring(
+    body,
+    name: str,
+    radius: float,
+    thickness: float,
+    height: float,
+    z: float,
+    mass_each: float,
+    friction,
+    segments: int = 24,
+) -> None:
     """Tangential overlapping boxes forming a closed ring wall (hollow vessel)."""
     half_y = (radius + thickness / 2.0) * np.tan(np.pi / segments)
     for i in range(segments):
@@ -330,8 +343,7 @@ def _ring(body, name: str, radius: float, thickness: float, height: float,
         )
 
 
-def _cyl(body, name: str, radius: float, half_h: float, z: float,
-         mass: float, friction) -> None:
+def _cyl(body, name: str, radius: float, half_h: float, z: float, mass: float, friction) -> None:
     body.add_geom(
         type=mujoco.mjtGeom.mjGEOM_CYLINDER,
         size=np.array([radius, half_h, 0.0], dtype=np.float64),
@@ -343,8 +355,9 @@ def _cyl(body, name: str, radius: float, half_h: float, z: float,
     )
 
 
-def _capsule(body, name: str, radius: float, half_len: float, pos, mass: float,
-             friction, quat=None) -> None:
+def _capsule(
+    body, name: str, radius: float, half_len: float, pos, mass: float, friction, quat=None
+) -> None:
     kwargs = {}
     if quat is not None:
         kwargs["quat"] = quat
@@ -380,15 +393,25 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         _ring(body, name, MUG_WALL_R, MUG_LIP_THICKNESS, 0.003, 0.0645, 0.0, friction)
         _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.019], 0.0, friction)
         _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.055], 0.0, friction)
-        _capsule(body, name, 0.004, 0.018, [0.047, 0.0, 0.037], 0.0, friction,
-                 quat=np.array([0.7071068, 0.0, 0.7071068, 0.0], dtype=np.float64))
+        _capsule(
+            body,
+            name,
+            0.004,
+            0.018,
+            [0.047, 0.0, 0.037],
+            0.0,
+            friction,
+            quat=np.array([0.7071068, 0.0, 0.7071068, 0.0], dtype=np.float64),
+        )
         body.explicitinertial = True
         body.mass = mass_kg
         body.ipos = [0.0, 0.0, 0.032]
         # Box inertia over the mug size (.077, .050, .064).
-        body.inertia = (mass_kg / 12.0 * np.array(
-            [0.050**2 + 0.064**2, 0.077**2 + 0.064**2, 0.077**2 + 0.050**2]
-        )).tolist()
+        body.inertia = (
+            mass_kg
+            / 12.0
+            * np.array([0.050**2 + 0.064**2, 0.077**2 + 0.064**2, 0.077**2 + 0.050**2])
+        ).tolist()
     elif name == "bottle":
         # 10 cm hollow bottle: base, body wall, shoulder step, narrow neck.
         # The neck is the grasp feature: its outer diameter must fit inside the
@@ -398,8 +421,16 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         _cyl(body, name, BOTTLE_WALL_R, 0.007, 0.007, per, friction)
         _ring(body, name, BOTTLE_WALL_R, 0.004, 0.041, 0.0275, per, friction)
         _ring(body, name, 0.024, 0.008, 0.010, 0.053, per, friction)
-        _ring(body, name, BOTTLE_NECK_CENTER_R, BOTTLE_NECK_WALL, BOTTLE_NECK_H,
-              BOTTLE_NECK_Z, per, friction)
+        _ring(
+            body,
+            name,
+            BOTTLE_NECK_CENTER_R,
+            BOTTLE_NECK_WALL,
+            BOTTLE_NECK_H,
+            BOTTLE_NECK_Z,
+            per,
+            friction,
+        )
 
 
 def _build_utensil(body, name: str, mass_kg: float, friction) -> None:
@@ -422,8 +453,16 @@ def _build_utensil(body, name: str, mass_kg: float, friction) -> None:
     if is_fork:
         _box(body, name, 0.0085, 0.007, 0.004, [0.0, 0.032, 0.004], 0.0, friction)
         for i in range(4):
-            _box(body, name, 0.00125, 0.011, 0.0015,
-                 [(i - 1.5) * 0.0048, 0.046, 0.004], 0.0, friction)
+            _box(
+                body,
+                name,
+                0.00125,
+                0.011,
+                0.0015,
+                [(i - 1.5) * 0.0048, 0.046, 0.004],
+                0.0,
+                friction,
+            )
     else:
         body.add_geom(
             type=mujoco.mjtGeom.mjGEOM_ELLIPSOID,
@@ -437,9 +476,11 @@ def _build_utensil(body, name: str, mass_kg: float, friction) -> None:
     body.explicitinertial = True
     body.mass = mass_kg
     body.ipos = [0.0, 0.0, height / 2.0]
-    body.inertia = (mass_kg / 12.0 * np.array(
-        [length**2 + height**2, width**2 + height**2, width**2 + length**2]
-    )).tolist()
+    body.inertia = (
+        mass_kg
+        / 12.0
+        * np.array([length**2 + height**2, width**2 + height**2, width**2 + length**2])
+    ).tolist()
 
 
 def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarray]) -> None:

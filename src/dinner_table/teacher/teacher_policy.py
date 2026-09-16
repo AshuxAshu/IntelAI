@@ -66,6 +66,10 @@ class FrameRecord:
     skill: str
     phase: str
     goal_xyz: list[float]
+    event: str = ""
+    ctrl: list[float] = field(default_factory=list)
+    sat: dict = field(default_factory=dict)
+    step_id: int = -1
 
 
 @dataclass
@@ -150,8 +154,9 @@ def goal_of(ctx: TeacherContext, step: Step) -> np.ndarray:
     if isinstance(step.target, RelativeTarget):
         anchor_position = ctx.object(step.target.anchor)[0]
     try:
-        return goal_for_skill(step.skill, step.object, object_position, step.target,
-                              anchor_position=anchor_position)
+        return goal_for_skill(
+            step.skill, step.object, object_position, step.target, anchor_position=anchor_position
+        )
     except ValueError:
         return np.zeros(3)
 
@@ -219,8 +224,9 @@ def _release_lost_grasps(ctx: TeacherContext, arms: tuple[str, ...]) -> None:
             ctx.carrying[arm] = None
 
 
-def _drive(ctx: TeacherContext, runner, log: EpisodeLog, group: list[Step],
-           skill_name: str) -> None:
+def _drive(
+    ctx: TeacherContext, runner, log: EpisodeLog, group: list[Step], skill_name: str, perturber=None
+) -> None:
     """Step physics through a skill's coroutine, recording one frame per tick."""
     primary = _primary(group)
     goal = goal_of(ctx, primary)
@@ -230,19 +236,36 @@ def _drive(ctx: TeacherContext, runner, log: EpisodeLog, group: list[Step],
         phase_source = runner
     for action in runner.run(ctx):
         phase = phase_source.phase
-        log.frames.append(FrameRecord(
-            tick=ctx.ticks(),
-            joints=[float(v) for v in ctx.scene.qpos_12()],
-            action=[float(v) for v in np.asarray(action, dtype=np.float64)],
-            skill=skill_name,
-            phase=phase,
-            goal_xyz=[float(v) for v in goal],
-        ))
+        if perturber is not None:
+            fired = perturber.poll(ctx)
+        else:
+            fired = []
+        tick = ctx.ticks()
+        joints = [float(v) for v in ctx.scene.qpos_12()]
+        commanded = [float(v) for v in np.asarray(action, dtype=np.float64)]
+        sat = ctx.saturation_state()
         ctx.live.note_skill(phase_source)
         ctx.step(action)
+        # NOTE: ctrl is captured post-step: the gripper saturation and drawer
+        # servo rewrite data.ctrl during the substeps, and the replay needs the
+        # final vector, not the pre-step action.
+        log.frames.append(
+            FrameRecord(
+                tick=tick,
+                joints=joints,
+                action=commanded,
+                skill=skill_name,
+                phase=phase,
+                goal_xyz=[float(v) for v in goal],
+                event=",".join(ev.name for ev in fired),
+                ctrl=[float(v) for v in ctx.data.ctrl],
+                sat=sat,
+                step_id=primary.id,
+            )
+        )
 
 
-def run_graph(scene, graph: TaskGraph, seed: int) -> EpisodeLog:
+def run_graph(scene, graph: TaskGraph, seed: int, perturber=None) -> EpisodeLog:
     """Execute a validated task graph with privileged grounding; never raises."""
     ctx = TeacherContext(scene)
     ctx.begin(STEP_TIMEOUT_S)
@@ -272,7 +295,7 @@ def run_graph(scene, graph: TaskGraph, seed: int) -> EpisodeLog:
             ctx.latch_hold()
             ctx.extend_deadline(STEP_TIMEOUT_S)
             try:
-                _drive(ctx, runner, log, group, skill_name)
+                _drive(ctx, runner, log, group, skill_name, perturber)
                 ok, cause = check_postcondition(ctx, primary)
                 if not ok:
                     raise SkillFailed(primary.skill, "verify", cause)
@@ -284,11 +307,12 @@ def run_graph(scene, graph: TaskGraph, seed: int) -> EpisodeLog:
                     phase, cause = exc.phase, exc.cause
                 else:
                     phase, cause = record.phase_at_failure, record.failure_cause
-                record = StepRecord(primary.id, primary.skill, primary.arm, "failed",
-                                    attempt, phase, cause)
+                record = StepRecord(
+                    primary.id, primary.skill, primary.arm, "failed", attempt, phase, cause
+                )
                 if attempt > MAX_STEP_RETRIES:
                     break
-                if not _recover(ctx, log, arms):
+                if not _recover(ctx, log, arms, perturber, primary.id):
                     break
                 continue
             record = StepRecord(primary.id, primary.skill, primary.arm, "success", attempt)
@@ -302,7 +326,9 @@ def run_graph(scene, graph: TaskGraph, seed: int) -> EpisodeLog:
     return log
 
 
-def _recover(ctx: TeacherContext, log: EpisodeLog, arms: tuple[str, ...]) -> bool:
+def _recover(
+    ctx: TeacherContext, log: EpisodeLog, arms: tuple[str, ...], perturber=None, step_id: int = -1
+) -> bool:
     """Park the acting arms for a retry; False when even the park fails."""
     _release_lost_grasps(ctx, arms)
     for arm in arms:
@@ -312,15 +338,29 @@ def _recover(ctx: TeacherContext, log: EpisodeLog, arms: tuple[str, ...]) -> boo
         home = Home(arm)
         try:
             for action in home.run(ctx):
-                log.frames.append(FrameRecord(
-                    tick=ctx.ticks(),
-                    joints=[float(v) for v in ctx.scene.qpos_12()],
-                    action=[float(v) for v in np.asarray(action, dtype=np.float64)],
-                    skill="home",
-                    phase=home.phase,
-                    goal_xyz=[0.0, 0.0, 0.0],
-                ))
+                if perturber is not None:
+                    fired = perturber.poll(ctx)
+                else:
+                    fired = []
+                tick = ctx.ticks()
+                joints = [float(v) for v in ctx.scene.qpos_12()]
+                commanded = [float(v) for v in np.asarray(action, dtype=np.float64)]
+                sat = ctx.saturation_state()
                 ctx.step(action)
+                log.frames.append(
+                    FrameRecord(
+                        tick=tick,
+                        joints=joints,
+                        action=commanded,
+                        skill="home",
+                        phase=home.phase,
+                        goal_xyz=[0.0, 0.0, 0.0],
+                        event=",".join(ev.name for ev in fired),
+                        ctrl=[float(v) for v in ctx.data.ctrl],
+                        sat=sat,
+                        step_id=step_id,
+                    )
+                )
         except SkillFailed:
             return False
     return True

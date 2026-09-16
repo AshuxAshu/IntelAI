@@ -41,21 +41,25 @@ class CameraRig:
             self._scene = None
 
         self._renderers: dict[str, mujoco.Renderer] = {}
-        for cam_name in CAMERA_NAMES:
-            if cam_name in ("wrist_A", "wrist_B"):
-                h, w = POLICY_IMAGE_SIZE
-            else:
-                h, w = OVERHEAD_RESOLUTION
-            self._renderers[cam_name] = mujoco.Renderer(self._model, h, w)
-
-        self._depth_renderer = mujoco.Renderer(
-            self._model, OVERHEAD_RESOLUTION[0], OVERHEAD_RESOLUTION[1]
-        )
-        self._depth_renderer.enable_depth_rendering()
+        self._depth_renderer: mujoco.Renderer | None = None
 
         self._cached_intrinsics: dict[str, np.ndarray] = {}
         for cam_name in CAMERA_NAMES:
             self._cached_intrinsics[cam_name] = self._compute_intrinsics(cam_name)
+
+    def _renderer(self, camera: str) -> mujoco.Renderer:
+        """Per-camera offscreen renderer, built on first render (needs GL)."""
+        if camera not in CAMERA_NAMES:
+            raise CameraRigError(f"unknown camera name: {camera}")
+        renderer = self._renderers.get(camera)
+        if renderer is None:
+            if camera in ("wrist_A", "wrist_B"):
+                h, w = POLICY_IMAGE_SIZE
+            else:
+                h, w = OVERHEAD_RESOLUTION
+            renderer = mujoco.Renderer(self._model, h, w)
+            self._renderers[camera] = renderer
+        return renderer
 
     def _compute_intrinsics(self, camera: str) -> np.ndarray:
         """Compute 3x3 intrinsic matrix K from camera vertical field of view."""
@@ -87,14 +91,17 @@ class CameraRig:
 
     def render(self, camera: str, data: mujoco.MjData) -> np.ndarray:
         """Render uint8 RGB image from specified camera name."""
-        if camera not in self._renderers:
-            raise CameraRigError(f"unknown camera name: {camera}")
-        renderer = self._renderers[camera]
+        renderer = self._renderer(camera)
         renderer.update_scene(data, camera=camera)
         return renderer.render()
 
     def render_depth(self, data: mujoco.MjData) -> np.ndarray:
         """Render float32 depth map in meters from the overhead camera."""
+        if self._depth_renderer is None:
+            self._depth_renderer = mujoco.Renderer(
+                self._model, OVERHEAD_RESOLUTION[0], OVERHEAD_RESOLUTION[1]
+            )
+            self._depth_renderer.enable_depth_rendering()
         self._depth_renderer.update_scene(data, camera="overhead")
         return self._depth_renderer.render()
 

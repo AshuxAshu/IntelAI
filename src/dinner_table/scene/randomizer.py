@@ -9,14 +9,29 @@ import numpy as np
 import yaml
 
 from dinner_table.config import DinnerTableError
-from dinner_table.scene.objects import DrProfile
+from dinner_table.scene.objects import OBJECT_CATALOG, DrProfile
 
 logger = logging.getLogger(__name__)
 
-TABLE_TEXTURES = ["table/table_01.png", "table/table_02.png", "table/table_03.png", "table/table_04.png", "table/table_05.png"]
-FLOOR_TEXTURES = ["floor/floor_01.png", "floor/floor_02.png", "floor/floor_03.png", "floor/floor_04.png"]
+TABLE_TEXTURES = [
+    "table/table_01.png",
+    "table/table_02.png",
+    "table/table_03.png",
+    "table/table_04.png",
+    "table/table_05.png",
+]
+FLOOR_TEXTURES = [
+    "floor/floor_01.png",
+    "floor/floor_02.png",
+    "floor/floor_03.png",
+    "floor/floor_04.png",
+]
 WALL_TEXTURES = ["wall/wall_01.png", "wall/wall_02.png", "wall/wall_03.png"]
-PLACEMAT_TEXTURES = ["placemat/placemat_01.png", "placemat/placemat_02.png", "placemat/placemat_03.png"]
+PLACEMAT_TEXTURES = [
+    "placemat/placemat_01.png",
+    "placemat/placemat_02.png",
+    "placemat/placemat_03.png",
+]
 
 
 class RandomizerError(DinnerTableError):
@@ -40,6 +55,14 @@ def load_dr_profile(profile_name_or_path: str | Path) -> DrProfile:
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
+    object_mass_scale: dict[str, tuple[float, float]] = {}
+    for key, value in data.items():
+        if key.endswith("_mass"):
+            name = key[: -len("_mass")]
+            if name not in OBJECT_CATALOG:
+                raise RandomizerError(f"unknown object in per-object mass key: {key}")
+            object_mass_scale[name] = (float(value[0]), float(value[1]))
+
     return DrProfile(
         mass_scale=tuple(data.get("mass_scale", (0.5, 2.0))),
         friction_scale=tuple(data.get("friction_scale", (0.4, 1.2))),
@@ -56,6 +79,7 @@ def load_dr_profile(profile_name_or_path: str | Path) -> DrProfile:
         perturb_event_probability=float(data.get("perturb_event_probability", 0.35)),
         holdout_textures=bool(data.get("holdout_textures", False)),
         seed=data.get("seed", None),
+        object_mass_scale=object_mass_scale,
     )
 
 
@@ -80,9 +104,14 @@ def apply_dr(
             if jnt.type == mujoco.mjtJoint.mjJNT_FREE:
                 has_freejoint = True
         if has_freejoint:
+            if body.name in dr.object_mass_scale:
+                lo, hi = dr.object_mass_scale[body.name]
+                mult = rng.uniform(lo, hi)
+            else:
+                mult = mass_mult
             for geom in body.geoms:
                 if not np.isnan(geom.mass):
-                    geom.mass = float(geom.mass * mass_mult)
+                    geom.mass = float(geom.mass * mult)
                 geom.friction = geom.friction * friction_mult
 
     # Scale drawer joint friction and damping

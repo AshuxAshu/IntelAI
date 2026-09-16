@@ -24,6 +24,7 @@ from dinner_table.teacher.live import LivePublisher
 TICK = 1.0 / CONTROL_HZ
 ARM_NAMES = ("A", "B")
 ARM_JOINT_SUFFIXES = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
+WAYPOINT_JITTER_RAD_PER_M = 1.75
 CONTACT_PENETRATION_TOL = -0.0008
 JAW_FORCE_MIN = 0.08
 SUPPORT_BODIES = ("table", "drawer_top", "cabinet", "world")
@@ -43,6 +44,18 @@ class SkillFailed(DinnerTableError):
 def _smooth(a: float) -> float:
     a = float(np.clip(a, 0.0, 1.0))
     return a**3 * (10.0 + a * (-15.0 + 6.0 * a))
+
+
+def saturation_ctrl(
+    model, data, act: int, qadr: int, vadr: int, torque_limit: float, ctrl_des: float
+) -> float:
+    """One torque-saturated gripper evaluation; shared by stepping and replay."""
+    kp = float(model.actuator_gainprm[act, 0])
+    kv = -float(model.actuator_biasprm[act, 2])
+    qpos = float(data.qpos[qadr])
+    qvel = float(data.qvel[vadr])
+    torque = kp * (ctrl_des - qpos) - kv * qvel
+    return qpos + float(np.clip(torque, -torque_limit, torque_limit)) / kp
 
 
 class TeacherContext:
@@ -77,6 +90,7 @@ class TeacherContext:
         # placing skill declares the window rather than the audit guessing.
         self._seating: dict[str, bool] = {"A": False, "B": False}
         self._deadline = np.inf
+        self._waypoint_jitter: tuple[float, np.random.Generator] | None = None
         self._cache_ids()
 
     def _cache_ids(self) -> None:
@@ -115,9 +129,7 @@ class TeacherContext:
             jaw_bodies: set[int] = set()
             for i in range(m.ngeom):
                 gname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, i) or ""
-                if gname.startswith(f"{arm}.fixed_jaw") or gname.startswith(
-                    f"{arm}.moving_jaw"
-                ):
+                if gname.startswith(f"{arm}.fixed_jaw") or gname.startswith(f"{arm}.moving_jaw"):
                     jaw_bodies.add(int(m.geom_bodyid[i]))
             for i in range(m.ngeom):
                 if int(m.geom_bodyid[i]) in jaw_bodies:
@@ -125,7 +137,8 @@ class TeacherContext:
         drawer_jnt = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "drawer_slide")
         self._drawer_qadr = int(m.jnt_qposadr[drawer_jnt])
         self._drawer_act = next(
-            i for i in range(m.nu)
+            i
+            for i in range(m.nu)
             if mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_ACTUATOR, i) == "drawer_actuator"
         )
 
@@ -150,7 +163,7 @@ class TeacherContext:
         """Linear speed (m/s) of a free-floating object's body origin."""
         bid = self.object_body(name)
         adr = int(self.model.jnt_dofadr[int(self.model.body_jntadr[bid])])
-        return float(np.linalg.norm(self.data.qvel[adr:adr + 3]))
+        return float(np.linalg.norm(self.data.qvel[adr : adr + 3]))
 
     def drawer_opening(self) -> float:
         return float(self.data.qpos[self._drawer_qadr])
@@ -214,9 +227,14 @@ class TeacherContext:
                 total += self._contact_force(i)
         return total
 
-    def grasp_verified(self, arm: str, object_name: str, max_tilt_deg: float,
-                       expect_site_at: np.ndarray | None = None,
-                       check_upright: bool = True) -> bool:
+    def grasp_verified(
+        self,
+        arm: str,
+        object_name: str,
+        max_tilt_deg: float,
+        expect_site_at: np.ndarray | None = None,
+        check_upright: bool = True,
+    ) -> bool:
         """Both jaws loaded and the ee at the grasp point; upright only when
         the object's orientation matters (capsules roll when squeezed).
 
@@ -228,7 +246,11 @@ class TeacherContext:
         if min(fixed, moving) <= JAW_FORCE_MIN:
             return False
         site_pos, _ = site_pose(self.data, f"{arm}.ee")
-        reference = np.asarray(expect_site_at) if expect_site_at is not None else self.object(object_name)[0]
+        reference = (
+            np.asarray(expect_site_at)
+            if expect_site_at is not None
+            else self.object(object_name)[0]
+        )
         limit = 0.02 if expect_site_at is not None else 0.06
         if float(np.linalg.norm(reference - site_pos)) > limit:
             return False
@@ -259,7 +281,7 @@ class TeacherContext:
         re-latched or it snaps back and throws its cargo (measured: arm A loses
         the relayed bottle within 0.4 s of arm B starting the next pick).
         """
-        for name in (ARM_NAMES if arm is None else (arm,)):
+        for name in ARM_NAMES if arm is None else (arm,):
             q = [float(self.data.qpos[self._jadr[name][s]]) for s in ARM_JOINT_SUFFIXES]
             grip = float(self.data.qpos[self._jadr[name]["gripper"]])
             self._hold[name] = np.append(q, self.scene._ctrl_to_aperture(name, grip))
@@ -291,12 +313,23 @@ class TeacherContext:
         """The shared per-object grasp frame catalog."""
         return self._catalog
 
-    def begin_carry(self, arm: str, object_name: str, torque: float,
-                    aperture: float = 0.0) -> None:
+    def saturation_state(self) -> dict:
+        """Per-arm effective torque-saturated close plus the drawer servo mode."""
+        state: dict = {"drawer_neutral": bool(self.drawer_neutral)}
+        for arm in ARM_NAMES:
+            close = self._grip_close[arm] or self._carry_grip[arm]
+            if close is None:
+                state[arm] = None
+            else:
+                state[arm] = [float(close[0]), float(close[1])]
+        return state
+
+    def begin_carry(self, arm: str, object_name: str, torque: float, aperture: float = 0.0) -> None:
         """Take ownership of a grasped object and hold the clamp until release."""
         self.carrying[arm] = object_name
         self._carry_grip[arm] = (
-            float(torque), float(self.scene._aperture_to_ctrl(arm, aperture)),
+            float(torque),
+            float(self.scene._aperture_to_ctrl(arm, aperture)),
         )
         self._bad_grip_since[arm] = None
 
@@ -340,15 +373,10 @@ class TeacherContext:
                     continue
                 torque_limit, ctrl_des = close
                 act = self._gact[arm]
-                kp = float(self.model.actuator_gainprm[act, 0])
-                kv = -float(self.model.actuator_biasprm[act, 2])
                 qadr, vadr = self._jadr[arm]["gripper"], self._gadr[arm]["gripper"]
-                qpos = float(self.data.qpos[qadr])
-                qvel = float(self.data.qvel[vadr])
-                torque = kp * (ctrl_des - qpos) - kv * qvel
-                self.data.ctrl[act] = qpos + float(
-                    np.clip(torque, -torque_limit, torque_limit)
-                ) / kp
+                self.data.ctrl[act] = saturation_ctrl(
+                    self.model, self.data, act, qadr, vadr, torque_limit, ctrl_des
+                )
             mujoco.mj_step(self.model, self.data)
         for arm in ARM_NAMES:
             if self._grip_close[arm] is not None or self._carry_grip[arm] is not None:
@@ -373,9 +401,12 @@ class TeacherContext:
                 if g1 not in geoms and g2 not in geoms:
                     continue
                 other = int(g2 if g1 in geoms else g1)
-                other_body = mujoco.mj_id2name(
-                    self.model, mujoco.mjtObj.mjOBJ_BODY, int(self.model.geom_bodyid[other])
-                ) or "world"
+                other_body = (
+                    mujoco.mj_id2name(
+                        self.model, mujoco.mjtObj.mjOBJ_BODY, int(self.model.geom_bodyid[other])
+                    )
+                    or "world"
+                )
                 # Self-collisions INSIDE the arm (the official model's jaw vs
                 # camera-mount graze at folded poses) are the robot's own
                 # structural overlap, not a world collision.
@@ -404,8 +435,7 @@ class TeacherContext:
 
     # ---- motion -------------------------------------------------------------
 
-    def play(self, arm: str, points: np.ndarray, grip_from: float, grip_to: float,
-             duration: float):
+    def play(self, arm: str, points: np.ndarray, grip_from: float, grip_to: float, duration: float):
         """Quintic playback through joint waypoints; duration floored by gradient.
 
         Yields 12-dim merged targets; the caller steps physics per yield.
@@ -420,6 +450,9 @@ class TeacherContext:
             pos = frac * (len(points) - 1)
             i = min(int(pos), len(points) - 2)
             q = points[i] + (points[i + 1] - points[i]) * (pos - i)
+            if self._waypoint_jitter is not None:
+                sigma, rng = self._waypoint_jitter
+                q = q + rng.normal(0.0, sigma, size=q.shape)
             grip = grip_from + (grip_to - grip_from) * frac
             yield self.action(arm, q, grip)
         yield self.action(arm, points[-1], grip_to)
@@ -465,39 +498,70 @@ class TeacherContext:
         grip = self._grip_now[arm]
         yield from self.play(arm, points, grip, grip, duration)
 
-    def plan_ik(self, arm: str, target_pos, approach, lateral=None, seed=None,
-                axis_index: int = 2) -> np.ndarray:
+    def plan_ik(
+        self, arm: str, target_pos, approach, lateral=None, seed=None, axis_index: int = 2
+    ) -> np.ndarray:
         """Solve one IK pose on the scratch data (live state is never touched)."""
         self.scratch.qpos[:] = self.data.qpos
         q0 = np.asarray(seed if seed is not None else arm_q(self.scratch, arm), dtype=np.float64)
-        return solve_ik(self.model, self.scratch, f"{arm}.ee", target_pos, approach, q0,
-                        target_lateral=lateral, axis_index=axis_index)
+        return solve_ik(
+            self.model,
+            self.scratch,
+            f"{arm}.ee",
+            target_pos,
+            approach,
+            q0,
+            target_lateral=lateral,
+            axis_index=axis_index,
+        )
 
-    def plan_cartesian(self, arm: str, start_pos: np.ndarray, end_pos: np.ndarray,
-                       approach: np.ndarray, lateral: np.ndarray | None,
-                       q_start: np.ndarray | None = None,
-                       axis_index: int = 2) -> np.ndarray:
+    def plan_cartesian(
+        self,
+        arm: str,
+        start_pos: np.ndarray,
+        end_pos: np.ndarray,
+        approach: np.ndarray,
+        lateral: np.ndarray | None,
+        q_start: np.ndarray | None = None,
+        axis_index: int = 2,
+    ) -> np.ndarray:
         """IK-densified Cartesian waypoints (2 mm spacing, warm-chained scratch solves)."""
         dist = float(np.linalg.norm(end_pos - start_pos))
         count = max(3, int(dist / 0.002) + 2)
         self.scratch.qpos[:] = self.data.qpos
-        q = np.asarray(q_start if q_start is not None else arm_q(self.scratch, arm),
-                       dtype=np.float64)
+        q = np.asarray(
+            q_start if q_start is not None else arm_q(self.scratch, arm), dtype=np.float64
+        )
         points = []
         for a in np.linspace(0.0, 1.0, count):
             target = start_pos + (end_pos - start_pos) * a
-            q = solve_ik(self.model, self.scratch, f"{arm}.ee", target, approach, q,
-                         target_lateral=lateral, axis_index=axis_index)
+            q = solve_ik(
+                self.model,
+                self.scratch,
+                f"{arm}.ee",
+                target,
+                approach,
+                q,
+                target_lateral=lateral,
+                axis_index=axis_index,
+            )
             points.append(q.copy())
         return np.asarray(points)
 
-    def play_cartesian(self, arm: str, end_pos: np.ndarray, approach: np.ndarray,
-                       lateral: np.ndarray | None, duration: float,
-                       axis_index: int = 2):
+    def play_cartesian(
+        self,
+        arm: str,
+        end_pos: np.ndarray,
+        approach: np.ndarray,
+        lateral: np.ndarray | None,
+        duration: float,
+        axis_index: int = 2,
+    ):
         """Plan (scratch IK + contact check) and play a Cartesian move."""
         start_pos, _ = site_pose(self.data, f"{arm}.ee")
-        points = self.plan_cartesian(arm, start_pos, np.asarray(end_pos), approach, lateral,
-                                     axis_index=axis_index)
+        points = self.plan_cartesian(
+            arm, start_pos, np.asarray(end_pos), approach, lateral, axis_index=axis_index
+        )
         self.check_path(arm, points)
         grip = self._grip_now[arm]
         yield from self.play(arm, points, grip, grip, duration)
@@ -530,16 +594,18 @@ class TeacherContext:
                 obj_pos, obj_quat = self.object(carried)
                 obj_mat = np.zeros(9, dtype=np.float64)
                 mujoco.mju_quat2Mat(obj_mat, np.asarray(obj_quat, dtype=np.float64))
-                carry_ref = (site_rot.T @ (obj_pos - site_pos), site_rot.T @ obj_mat.reshape(3, 3), jadr)
+                carry_ref = (
+                    site_rot.T @ (obj_pos - site_pos),
+                    site_rot.T @ obj_mat.reshape(3, 3),
+                    jadr,
+                )
         for wi, q in enumerate(points):
             if drawer_follow:
                 frac = wi / max(len(points) - 1, 1)
                 scratch.qpos[self._drawer_qadr] = frac * DRAWER_TRAVEL
             for k, s in enumerate(ARM_JOINT_SUFFIXES):
                 scratch.qpos[self._jadr[arm][s]] = q[k]
-            scratch.qpos[self._jadr[arm]["gripper"]] = float(
-                self.data.ctrl[self._gact[arm]]
-            )
+            scratch.qpos[self._jadr[arm]["gripper"]] = float(self.data.ctrl[self._gact[arm]])
             mujoco.mj_forward(self.model, scratch)
             if carry_ref is not None:
                 rel_pos, rel_rot, jadr = carry_ref
@@ -556,18 +622,27 @@ class TeacherContext:
                 if g1 not in geoms and g2 not in geoms:
                     continue
                 other = int(g2 if g1 in geoms else g1)
-                other_body = mujoco.mj_id2name(
-                    self.model, mujoco.mjtObj.mjOBJ_BODY, int(self.model.geom_bodyid[other])
-                ) or "world"
+                other_body = (
+                    mujoco.mj_id2name(
+                        self.model, mujoco.mjtObj.mjOBJ_BODY, int(self.model.geom_bodyid[other])
+                    )
+                    or "world"
+                )
                 if other_body.startswith(f"{arm}."):
                     continue  # arm-internal self-collision; see _audit_contacts
                 if other_body == carried or other_body in self.allowed[arm]:
                     continue
                 raise SkillFailed("skill", "path_blocked", f"planned path contacts {other_body}")
 
-    def close_gripper(self, arm: str, torque_limit: float, aperture: float = 0.0,
-                      seconds: float = 9.0, object_name: str | None = None,
-                      q_hold: np.ndarray | None = None):
+    def close_gripper(
+        self,
+        arm: str,
+        torque_limit: float,
+        aperture: float = 0.0,
+        seconds: float = 9.0,
+        object_name: str | None = None,
+        q_hold: np.ndarray | None = None,
+    ):
         """Torque-saturated gripper close (software clamp on the servo).
 
         The saturation runs per physics substep inside ``step``; this generator
@@ -576,8 +651,9 @@ class TeacherContext:
         """
         ctrl_des = self.scene._aperture_to_ctrl(arm, aperture)
         self._grip_close[arm] = (float(torque_limit), float(ctrl_des))
-        held = np.asarray(q_hold if q_hold is not None else arm_q(self.data, arm),
-                          dtype=np.float64).copy()
+        held = np.asarray(
+            q_hold if q_hold is not None else arm_q(self.data, arm), dtype=np.float64
+        ).copy()
         end = float(self.data.time) + seconds
         try:
             while float(self.data.time) < end:
@@ -606,12 +682,14 @@ class TeacherContext:
         finally:
             self._grip_close[arm] = None
 
-    def begin_carry(self, arm: str, object_name: str, torque_limit: float,
-                    aperture: float = 0.0) -> None:
+    def begin_carry(
+        self, arm: str, object_name: str, torque_limit: float, aperture: float = 0.0
+    ) -> None:
         """Take ownership of a grasped object and clamp it until it is released."""
         self.carrying[arm] = object_name
         self._carry_grip[arm] = (
-            float(torque_limit), float(self.scene._aperture_to_ctrl(arm, aperture)),
+            float(torque_limit),
+            float(self.scene._aperture_to_ctrl(arm, aperture)),
         )
         self._bad_grip_since[arm] = None
 
@@ -670,8 +748,7 @@ class TeacherContext:
         self.drawer_neutral = False
         self.data.ctrl[self._drawer_act] = float(self.data.qpos[self._drawer_qadr])
 
-    def servo_drawer(self, arm: str = "A", seconds: float = 3.0,
-                     target_opening: float = 0.0):
+    def servo_drawer(self, arm: str = "A", seconds: float = 3.0, target_opening: float = 0.0):
         """Slide the drawer to ``target_opening`` (m) via its position servo.
 
         Used when the gripper is not available for a physical handle pull:
@@ -690,3 +767,35 @@ class TeacherContext:
             frac = _smooth((float(self.data.time) - t0) / seconds)
             self.data.ctrl[self._drawer_act] = start + (target_opening - start) * frac
             yield self.action(arm, arm_q(self.data, arm), self._grip_now[arm])
+
+    # ---- perturbation (data engine only; the teacher never calls these) --------
+
+    def perturb_gripper(self, arm: str, delta_rad: float) -> None:
+        """Jog one gripper joint by a fixed angle; the servo pulls it back."""
+        self.data.qpos[self._jadr[arm]["gripper"]] += float(delta_rad)
+        mujoco.mj_forward(self.model, self.data)
+
+    def jitter_teacher_waypoints(self, sigma_cm: float, rng: np.random.Generator) -> None:
+        """Arm persistent per-tick joint noise on every later playback."""
+        self._waypoint_jitter = (float(sigma_cm) / 100.0 * WAYPOINT_JITTER_RAD_PER_M, rng)
+
+    def shift_object(self, name: str, dx_m: float, dy_m: float) -> None:
+        """Teleport a free-floating object by (dx, dy); the teacher re-targets."""
+        bid = self.object_body(name)
+        jid = int(self.model.body_jntadr[bid])
+        if int(self.model.jnt_type[jid]) != int(mujoco.mjtJoint.mjJNT_FREE):
+            raise SkillFailed("perturb", "shift", f"object {name} is not free-floating")
+        adr = int(self.model.jnt_qposadr[jid])
+        self.data.qpos[adr] += float(dx_m)
+        self.data.qpos[adr + 1] += float(dy_m)
+        mujoco.mj_forward(self.model, self.data)
+
+    def set_joint_damping(self, joint_name: str, factor: float) -> None:
+        """Scale one joint's damping and friction loss (a friction spike)."""
+        jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        if jid == -1:
+            raise SkillFailed("perturb", "damping", f"unknown joint {joint_name}")
+        # NOTE: DR treats damping and frictionloss as one axis, so the spike scales both.
+        dof = int(self.model.jnt_dofadr[jid])
+        self.model.dof_damping[dof] = float(self.model.dof_damping[dof] * factor)
+        self.model.dof_frictionloss[dof] = float(self.model.dof_frictionloss[dof] * factor)

@@ -512,6 +512,60 @@ class Place(Skill):
         except GraspCatalogError as exc:
             raise SkillFailed("place", "carry", "dropped") from exc
 
+    def feasible_align_height(self, ctx: TeacherContext) -> float | None:
+        """Highest align height whose carry transit dry-plans (no motion).
+
+        Mirrors run()'s carry block (rise, then the descending align-height
+        loop) using scratch planning only; keep the two in sync. Callers use
+        it to choose between candidate targets before committing to motion.
+        """
+        frame = self._carry_frame(ctx)
+        site_pos, _ = site_pose(ctx.data, f"{self.arm}.ee")
+        frame_pos, _ = ctx.object(self.object_name)
+        offset = site_pos - frame_pos
+        target = self._target_xyz(ctx)
+        carry_cap = TABLE_TOP_HEIGHT + 0.068
+        risen = np.array(site_pos, dtype=np.float64)
+        for rise in (0.020, 0.015, 0.010, 0.005):
+            target_z = min(float(site_pos[2]) + rise, carry_cap)
+            if target_z <= float(site_pos[2]) + 1e-6:
+                break
+            try:
+                ctx.plan_cartesian(
+                    self.arm,
+                    risen,
+                    np.array([site_pos[0], site_pos[1], target_z]),
+                    frame.approach,
+                    frame.lateral,
+                    axis_index=frame.axis_index,
+                )
+                risen = np.array([site_pos[0], site_pos[1], target_z])
+                break
+            except (IKUnreachable, SkillFailed):
+                continue
+        is_cutlery = self.object_name.startswith(("fork", "spoon"))
+        transit_lateral = None if is_cutlery else frame.lateral
+        align_xy = (target[0] + offset[0], target[1] + offset[1])
+        z = float(risen[2])
+        while z >= TABLE_TOP_HEIGHT + 0.05 - 1e-9:
+            goal = np.array([align_xy[0], align_xy[1], z])
+            try:
+                pts = ctx.plan_cartesian(
+                    self.arm,
+                    risen,
+                    goal,
+                    frame.approach,
+                    transit_lateral,
+                    axis_index=frame.axis_index,
+                )
+                if self.object_name == "bottle":
+                    pts = _joint_segment(arm_q(ctx.data, self.arm), pts[-1])
+                ctx.check_path(self.arm, pts)
+                return z
+            except (IKUnreachable, SkillFailed):
+                z -= 0.005
+        return None
+
     def run(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
         if ctx.carrying.get(self.arm) != self.object_name:
             raise SkillFailed("place", "carry", "dropped")
@@ -773,6 +827,10 @@ class Place(Skill):
         # Rise well clear of the placed object before the home sweep: the
         # joint arc dips a few mm early on and the jaw tips catch the rim of
         # a just-placed mug (measured: hooked at site z 0.444 vs rim 0.435).
+        # Pinned first (the orientation that seats the grasp is also the one
+        # whose rise clears it); the relaxed rungs below only run when every
+        # pinned rise fails — relaxing unconditionally regressed 17/20 to
+        # 13/20 (measured: slower branches, timeouts, knocked bottles).
         for rise in (0.06, 0.05, 0.04, 0.03):
             try:
                 yield from ctx.play_cartesian(
@@ -782,6 +840,18 @@ class Place(Skill):
                 break
             except (IKUnreachable, SkillFailed):
                 continue
+        else:
+            # No pinned rise solved (low south stations): retry small rises
+            # with the wrist free — the grip is open, nothing left to protect.
+            for rise in (0.03, 0.02, 0.01):
+                try:
+                    yield from ctx.play_cartesian(
+                        self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0]
+                        + np.array([0.0, 0.0, rise]),
+                        frame.approach, None, 2.0, axis_index=frame.axis_index)
+                    break
+                except (IKUnreachable, SkillFailed):
+                    continue
         # The object is furniture again: `Pick` whitelisted it so the approach
         # could work at contact distance, and leaving it whitelisted would let
         # the home sweep knock a placed object over unnoticed.
@@ -798,9 +868,54 @@ class Place(Skill):
             home_pts = home_points()
             ctx.check_path(self.arm, home_pts)
         except SkillFailed:
-            back = site_pose(ctx.data, f"{self.arm}.ee")[0] + np.array([0.0, -0.10, 0.0])
-            yield from ctx.play_cartesian(self.arm, back, frame.approach,
-                                          frame.lateral, 2.5, axis_index=frame.axis_index)
+            # The straight home arc would clip the placed object; retreat and
+            # re-plan. -y first (the tuned table-edge escape), then the other
+            # cardinals, then diagonal micro-lifts: south of the comfort
+            # stations -y lands in the near-field dead zone while pure +z
+            # hits the orientation ceiling (measured), but up-and-sideways
+            # keeps the wrist solvable. Every rung is plan- and contact-
+            # checked; the ladder only engages when the straight arc fails.
+            side = 1.0 if self.arm == "B" else -1.0
+            pinned = (
+                [0.0, -0.10, 0.0],
+                [0.0, 0.10, 0.0],
+                [0.10 * side, 0.0, 0.0],
+                [-0.10 * side, 0.0, 0.0],
+                [-0.05 * side, 0.0, 0.01],
+                [-0.05 * side, 0.0, 0.02],
+                [0.05 * side, 0.0, 0.01],
+                [0.05 * side, 0.0, 0.02],
+            )
+            # Second-chance rungs, tried only after every pinned rung fails:
+            # the same offsets with the wrist free, then up-and-sideways
+            # escapes plus plain verticals for the low south stations where
+            # every level rung lands in the near-field dead zone. Pinned
+            # first is load-bearing — relaxing unconditionally regressed
+            # 17/20 to 13/20 (measured).
+            relaxed = (
+                *pinned,
+                [0.05 * side, -0.05, 0.03],
+                [-0.05 * side, -0.05, 0.03],
+                [0.05 * side, 0.05, 0.03],
+                [-0.05 * side, 0.05, 0.03],
+                [0.0, 0.0, 0.05],
+                [0.0, 0.0, 0.08],
+            )
+            ladder = [(r, frame.lateral) for r in pinned] + [(r, None) for r in relaxed]
+            recovered = False
+            for retreat, lateral in ladder:
+                back = (site_pose(ctx.data, f"{self.arm}.ee")[0]
+                        + np.array(retreat))
+                try:
+                    yield from ctx.play_cartesian(self.arm, back, frame.approach,
+                                                  lateral, 2.5,
+                                                  axis_index=frame.axis_index)
+                    recovered = True
+                    break
+                except (IKUnreachable, SkillFailed):
+                    continue
+            if not recovered:
+                raise SkillFailed("place", "retract", "ik_unreachable")
             home_pts = home_points()
             ctx.check_path(self.arm, home_pts)
         grip_now = ctx._grip_now[self.arm]
@@ -1146,9 +1261,15 @@ class Pour(Skill):
         mug_pos, _ = ctx.object(self.target)
         plate_pos, _ = ctx.object("plate")
         clearance = PLATE_RIM_R + MUG_WALL_R + 0.035
-        station = np.array([0.0, plate_pos[1] - np.sqrt(
+        base = np.array([0.0, plate_pos[1] - np.sqrt(
             max(0.0, clearance ** 2 - plate_pos[0] ** 2))])
-        if np.linalg.norm(mug_pos[:2] - station) < 0.015:
+        # Idempotent against every station this skill can choose: prepare runs
+        # twice under ParallelGroup (group setup, then run), so the staged
+        # check must accept the comfort grid as well as the base — otherwise
+        # the second pass re-stages a settled mug.
+        xs = self._COMFORT_XS if receiver == "B" else tuple(-x for x in self._COMFORT_XS)
+        valid = [base, *(np.array([x, y]) for x in xs for y in self._COMFORT_YS)]
+        if min(float(np.linalg.norm(mug_pos[:2] - s)) for s in valid) < 0.015:
             return  # staged — held or resting at the station, nothing to move
         if ctx.carrying[receiver] not in (None, self.target):
             raise SkillFailed("pour", "prepare", "receiver_busy")
@@ -1156,6 +1277,7 @@ class Pour(Skill):
         if ctx.carrying[receiver] == self.target:
             # Receiver already holds the mug: park the bottle clear of the
             # staging corridor, reseat the mug, then re-take both grasps.
+            station = self._choose_station(ctx, receiver, base, clearance, plate_pos)
             yield from Place(self.arm, self.object_name, (0.04, -0.02)).run(ctx)
             ctx.latch_hold()
             yield from Place(receiver, self.target, station).run(ctx)
@@ -1169,10 +1291,51 @@ class Pour(Skill):
             ctx.latch_hold()
             yield from Pick(receiver, self.target).run(ctx)
             ctx.latch_hold()
+            station = self._choose_station(ctx, receiver, base, clearance, plate_pos)
             yield from Place(receiver, self.target, station).run(ctx)
             ctx.latch_hold()
             yield from Pick(self.arm, self.object_name).run(ctx)
             ctx.latch_hold()
+
+    # Receiver comfort grid (arm-B coordinates; mirrored for arm A): the
+    # mid-workspace columns north of the near-field singularity zone, where
+    # the mug-carry transit demonstrably plans (measured grids: the feasible
+    # band sits near y = -0.20 while the plate-relative base drops to
+    # y = -0.30 for south plates). Candidates are filtered by plate
+    # clearance and dry-planned before use — the grid proposes, IK disposes.
+    _COMFORT_XS = (-0.04, 0.02, 0.05, 0.08, 0.11)
+    _COMFORT_YS = (-0.22, -0.20, -0.18)
+
+    def _choose_station(self, ctx: TeacherContext, receiver: str, base: np.ndarray,
+                        clearance: float, plate_pos: np.ndarray) -> np.ndarray:
+        """First plate-clear station whose staging transit dry-plans.
+
+        The straight-line carry transit crosses orientation dead zones from
+        some pick configurations even when the goal solves (measured: seed 1
+        vs seed 0 with 3 mm-apart stations); a verified shift re-routes the
+        segment. Falls back to the base station when nothing dry-plans, so
+        execution raises the honest error.
+        """
+        try:
+            if Place(receiver, self.target, base).feasible_align_height(ctx) is not None:
+                return base
+        except SkillFailed:
+            pass
+        xs = self._COMFORT_XS if receiver == "B" else tuple(-x for x in self._COMFORT_XS)
+        cells = sorted(
+            ((x, y) for x in xs for y in self._COMFORT_YS),
+            key=lambda c: (c[0] - base[0]) ** 2 + (c[1] - base[1]) ** 2,
+        )
+        for x, y in cells:
+            alt = np.array([x, y])
+            if float(np.linalg.norm(alt - plate_pos[:2])) < clearance:
+                continue
+            try:
+                if Place(receiver, self.target, alt).feasible_align_height(ctx) is not None:
+                    return alt
+            except SkillFailed:
+                continue
+        return base
 
     def run(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
         from dinner_table.teacher.pour_planner import plan_pour, plan_return
