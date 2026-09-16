@@ -173,12 +173,18 @@ def _axis_space_phase(
     arm: str,
     target_pos: np.ndarray,
     target_approach: np.ndarray,
-    target_lateral: np.ndarray,
+    target_lateral: np.ndarray | None,
     q: np.ndarray,
     pos_tol: float,
     ang_tol: float,
+    axis_index: int = 2,
 ) -> tuple[np.ndarray, float, float]:
     """One axis-space solve from seed q (reference formulation).
+
+    ``axis_index`` selects which site axis ``target_approach`` constrains: 2 is
+    the finger direction (top-down grasps), 1 is the jaw-spread axis (the side
+    grasp, where only "fingers horizontal" matters and the reach direction is
+    left to the solver). ``target_lateral`` adds the site-X row pair when given.
 
     Returns (q, pos_err, worst_axis_err) where worst_axis_err is the larger
     axis misalignment in radians.
@@ -192,30 +198,24 @@ def _axis_space_phase(
         set_arm_q(data, arm, q)
         mujoco.mj_forward(model, data)
         pos, rot = site_pose(data, site)
-        zax, xax = rot[:, 2], rot[:, 0]
-        err = np.concatenate(
-            [
-                target_pos - pos,
-                AXIS_SCALE * (target_approach - zax),
-                AXIS_SCALE * (target_lateral - xax),
-            ]
-        )
+        primary = rot[:, axis_index]
+        rows = [target_pos - pos, AXIS_SCALE * (target_approach - primary)]
+        jac = site_jacobian(model, data, site)
+        blocks = [jac[:3], -AXIS_SCALE * _skew(primary) @ jac[3:]]
+        if target_lateral is not None:
+            xax = rot[:, 0]
+            rows.append(AXIS_SCALE * (target_lateral - xax))
+            blocks.append(-AXIS_SCALE * _skew(xax) @ jac[3:])
+        err = np.concatenate(rows)
         pos_err = float(np.linalg.norm(err[:3]))
         axis_err = max(
-            float(np.linalg.norm(err[3:6])), float(np.linalg.norm(err[6:9]))
+            float(np.linalg.norm(err[3 * i : 3 * i + 3])) for i in range(1, len(rows))
         ) / AXIS_SCALE
         if pos_err < pos_tol and axis_err < axis_tol:
             break
-        jac = site_jacobian(model, data, site)
-        aug = np.vstack(
-            [
-                jac[:3],
-                -AXIS_SCALE * _skew(zax) @ jac[3:],
-                -AXIS_SCALE * _skew(xax) @ jac[3:],
-            ]
-        )
+        aug = np.vstack(blocks)
         dq = aug.T @ np.linalg.solve(
-            aug @ aug.T + np.eye(9, dtype=np.float64) * AXIS_DAMPING2, err
+            aug @ aug.T + np.eye(len(err), dtype=np.float64) * AXIS_DAMPING2, err
         )
         step = float(np.max(np.abs(dq)))
         if step > AXIS_STEP_CAP:
@@ -236,12 +236,15 @@ def solve_ik(
     iters: int = MAX_ITERS,
     damping: float = DAMPING,
     target_lateral=None,
+    axis_index: int = 2,
 ) -> np.ndarray:
     """Solve IK for the arm site to (target_pos, target_approach[, target_lateral]).
 
     ``target_lateral`` optionally constrains the site's local X axis direction
-    (the reference teacher's ``x_target``). Joint limits are clipped every
-    iteration; failure raises ``IKUnreachable``.
+    (the reference teacher's ``x_target``). ``axis_index`` selects the site axis
+    that ``target_approach`` pins: 2 (default) is the finger direction, 1 is the
+    jaw-spread axis used by the bottle's side grasp. Joint limits are clipped
+    every iteration; failure raises ``IKUnreachable``.
     """
     arm = arm_of(site)
     target_pos = np.asarray(target_pos, dtype=np.float64)
@@ -278,7 +281,7 @@ def solve_ik(
         seeds.append(restart_rng.uniform(lower, upper))
 
     for seed in seeds:
-        if target_lateral is None:
+        if target_lateral is None and axis_index == 2:
             q = _iterate(
                 model,
                 data,
@@ -297,7 +300,7 @@ def solve_ik(
         else:
             q, pos_err, axis_err = _axis_space_phase(
                 model, data, site, arm, target_pos, target_approach,
-                target_lateral, seed, pos_tol, ang_tol,
+                target_lateral, seed, pos_tol, ang_tol, axis_index,
             )
             if pos_err < pos_tol and axis_err < 2.0 * np.sin(ang_tol / 2.0):
                 return q
