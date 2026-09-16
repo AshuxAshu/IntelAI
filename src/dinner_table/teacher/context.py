@@ -17,6 +17,7 @@ import numpy as np
 
 from dinner_table.config import DinnerTableError
 from dinner_table.contracts.geometry import CONTROL_HZ, DRAWER_TRAVEL, PHYSICS_HZ
+from dinner_table.teacher.grasp_catalog import GraspCatalog
 from dinner_table.teacher.ik import solve_ik
 from dinner_table.teacher.kinematics import arm_q, site_pose
 from dinner_table.teacher.live import LivePublisher
@@ -54,6 +55,8 @@ class TeacherContext:
         self.data = scene.data
         self.scratch = mujoco.MjData(self.model)
         self.live = LivePublisher(scene)
+        self._catalog = GraspCatalog()
+        self._ticks = 0
         self.carrying: dict[str, str | None] = {"A": None, "B": None}
         self.allowed: dict[str, set[str]] = {"A": set(), "B": set()}
         self.drawer_neutral = False  # hold the drawer servo error at zero (physical pulls)
@@ -63,13 +66,10 @@ class TeacherContext:
         # The saturated ctrl advances per PHYSICS STEP (the reference engine's
         # bandwidth); a 25 Hz update is ~8x too slow at our 500 Hz timestep.
         self._grip_close: dict[str, tuple[float, float] | None] = {"A": None, "B": None}
-        # A carried object's squeeze has to outlive the skill that grasped it.
-        # In a multi-step graph the next step drives the OTHER arm, so the
-        # holding arm runs with no active close; a plain position servo at the
-        # resting aperture exerts no steady-state clamp and the cargo slides
-        # out while its arm just sits there (measured: arm A drops the bottle
-        # during arm B's mug pick). Set by `begin_carry`, cleared by
-        # `end_carry`, and overridden by any explicit close in progress.
+        # A carried object's squeeze outlives the skill that grasped it: a
+        # multi-step graph drives the OTHER arm next, and a plain position
+        # servo at the resting aperture exerts no steady-state clamp, so the
+        # idle arm's cargo slides out within about a second (measured).
         self._carry_grip: dict[str, tuple[float, float] | None] = {"A": None, "B": None}
         self._bad_grip_since: dict[str, float | None] = {"A": None, "B": None}
         # Arms deliberately pressing their cargo onto a surface. A seated
@@ -85,6 +85,7 @@ class TeacherContext:
         self._jadr = {}
         self._gadr = {}
         self._gact = {}
+        self._act = {}
         for arm in ARM_NAMES:
             self._jadr[arm] = {
                 s: int(m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, f"{arm}.{s}")])
@@ -95,6 +96,10 @@ class TeacherContext:
                 for s in ARM_JOINT_SUFFIXES + ("gripper",)
             }
             self._gact[arm] = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, f"{arm}.gripper")
+            self._act[arm] = {
+                s: mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, f"{arm}.{s}")
+                for s in ARM_JOINT_SUFFIXES
+            }
         self._arm_geoms: dict[str, set[int]] = {arm: set() for arm in ARM_NAMES}
         self._jaw_geoms: dict[str, set[int]] = {arm: set() for arm in ARM_NAMES}
         for i in range(m.ngeom):
@@ -261,6 +266,51 @@ class TeacherContext:
             self._hold[name] = np.append(q, self.scene._ctrl_to_aperture(name, grip))
             self._grip_now[name] = float(self._hold[name][5])
 
+    def extend_deadline(self, seconds: float) -> None:
+        """Re-arm the skill deadline without disturbing the hold snapshot."""
+        self._deadline = float(self.data.time) + float(seconds)
+
+    def latch_hold(self, arm: str | None = None) -> None:
+        """Re-snapshot an arm's idle hold target from its commanded actuator state.
+
+        A paired run drives both arms at once, so the snapshot taken at
+        ``begin`` is stale for whichever arm moved under the other's
+        generator; the next single-arm skill would then yank the idle arm back
+        to an old pose.
+        """
+        arms = ARM_NAMES if arm is None else (arm,)
+        for name in arms:
+            q = [float(self.data.ctrl[self._act[name][s]]) for s in ARM_JOINT_SUFFIXES]
+            grip = float(self.data.ctrl[self._gact[name]])
+            self._hold[name] = np.append(q, self.scene._ctrl_to_aperture(name, grip))
+
+    def ticks(self) -> int:
+        """Control ticks elapsed since this context was created."""
+        return self._ticks
+
+    def grasp_catalog(self) -> GraspCatalog:
+        """The shared per-object grasp frame catalog."""
+        return self._catalog
+
+    def begin_carry(self, arm: str, object_name: str, torque: float,
+                    aperture: float = 0.0) -> None:
+        """Take ownership of a grasped object and hold the clamp until release."""
+        self.carrying[arm] = object_name
+        self._carry_grip[arm] = (
+            float(torque), float(self.scene._aperture_to_ctrl(arm, aperture)),
+        )
+        self._bad_grip_since[arm] = None
+
+    def end_carry(self, arm: str) -> None:
+        """Give up a grasp: the carry audit and the standing clamp both stop."""
+        self.carrying[arm] = None
+        self._carry_grip[arm] = None
+        self._bad_grip_since[arm] = None
+
+    def fill_fraction(self, container: str) -> float:
+        """Visual-proxy fill level of a container, 0-1."""
+        return float(self.scene.fill_fraction(container))
+
     def action(self, arm: str, q_arm: np.ndarray, aperture: float) -> np.ndarray:
         """Build a 12-dim merged target: acting arm moves, other arm holds."""
         out = np.zeros(12, dtype=np.float64)
@@ -279,11 +329,14 @@ class TeacherContext:
         physics substep.
         """
         self.scene.set_targets(action)
+        self._ticks += 1
         for _ in range(int(round(TICK * PHYSICS_HZ))):
             if self.drawer_neutral:
                 self.hold_drawer_neutral()
             for arm in ARM_NAMES:
                 close = self._grip_close[arm] or self._carry_grip[arm]
+                if close is None:
+                    close = self._carry_grip[arm]
                 if close is None:
                     continue
                 torque_limit, ctrl_des = close
@@ -372,6 +425,39 @@ class TeacherContext:
             yield self.action(arm, q, grip)
         yield self.action(arm, points[-1], grip_to)
 
+    def follow(self, arm: str, waypoints, speed: float = 1.0):
+        """Play joint waypoints at the gradient-derived minimum duration.
+
+        ``speed`` scales that floor (values above 1.0 move faster, and the
+        quintic playback in ``play`` still enforces the velocity-gradient
+        lower bound).
+        """
+        points = np.asarray(waypoints, dtype=np.float64)
+        gradient = float(np.abs(np.diff(points, axis=0)).max()) * (len(points) - 1)
+        duration = max(1.875 * gradient / 0.8, 0.5) / max(float(speed), 1e-3)
+        grip = self._grip_now[arm]
+        yield from self.play(arm, points, grip, grip, duration)
+
+    def path_clear(self, arm: str, q_waypoints, object_name: str | None = None) -> bool:
+        """True when a waypoint path passes the scratch-data contact audit.
+
+        A carried object is teleported along the gripper and exempted by
+        ``check_path``; ``object_name`` additionally exempts a body the arm is
+        about to grasp, whose hover run-in legitimately closes to contact
+        distance of it.
+        """
+        exempt = object_name is not None and self.carrying[arm] != object_name
+        if exempt:
+            self.allowed[arm].add(object_name)
+        try:
+            self.check_path(arm, np.asarray(q_waypoints, dtype=np.float64))
+        except SkillFailed:
+            return False
+        finally:
+            if exempt:
+                self.allowed[arm].discard(object_name)
+        return True
+
     def play_joint(self, arm: str, q_goal: np.ndarray, duration: float):
         """Checked joint-space interpolation from the live pose to q_goal."""
         q_start = arm_q(self.data, arm)
@@ -380,16 +466,18 @@ class TeacherContext:
         grip = self._grip_now[arm]
         yield from self.play(arm, points, grip, grip, duration)
 
-    def plan_ik(self, arm: str, target_pos, approach, lateral=None, seed=None) -> np.ndarray:
+    def plan_ik(self, arm: str, target_pos, approach, lateral=None, seed=None,
+                axis_index: int = 2) -> np.ndarray:
         """Solve one IK pose on the scratch data (live state is never touched)."""
         self.scratch.qpos[:] = self.data.qpos
         q0 = np.asarray(seed if seed is not None else arm_q(self.scratch, arm), dtype=np.float64)
         return solve_ik(self.model, self.scratch, f"{arm}.ee", target_pos, approach, q0,
-                        target_lateral=lateral)
+                        target_lateral=lateral, axis_index=axis_index)
 
     def plan_cartesian(self, arm: str, start_pos: np.ndarray, end_pos: np.ndarray,
                        approach: np.ndarray, lateral: np.ndarray | None,
-                       q_start: np.ndarray | None = None) -> np.ndarray:
+                       q_start: np.ndarray | None = None,
+                       axis_index: int = 2) -> np.ndarray:
         """IK-densified Cartesian waypoints (2 mm spacing, warm-chained scratch solves)."""
         dist = float(np.linalg.norm(end_pos - start_pos))
         count = max(3, int(dist / 0.002) + 2)
@@ -400,15 +488,17 @@ class TeacherContext:
         for a in np.linspace(0.0, 1.0, count):
             target = start_pos + (end_pos - start_pos) * a
             q = solve_ik(self.model, self.scratch, f"{arm}.ee", target, approach, q,
-                         target_lateral=lateral)
+                         target_lateral=lateral, axis_index=axis_index)
             points.append(q.copy())
         return np.asarray(points)
 
     def play_cartesian(self, arm: str, end_pos: np.ndarray, approach: np.ndarray,
-                       lateral: np.ndarray | None, duration: float):
+                       lateral: np.ndarray | None, duration: float,
+                       axis_index: int = 2):
         """Plan (scratch IK + contact check) and play a Cartesian move."""
         start_pos, _ = site_pose(self.data, f"{arm}.ee")
-        points = self.plan_cartesian(arm, start_pos, np.asarray(end_pos), approach, lateral)
+        points = self.plan_cartesian(arm, start_pos, np.asarray(end_pos), approach, lateral,
+                                     axis_index=axis_index)
         self.check_path(arm, points)
         grip = self._grip_now[arm]
         yield from self.play(arm, points, grip, grip, duration)

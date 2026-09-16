@@ -268,9 +268,15 @@ PLATE_RIM_R = 0.061
 MUG_WALL_R = 0.025
 BOTTLE_WALL_R = 0.028  # body wall centerline radius
 BOTTLE_NECK_Z = 0.073  # neck mid-height above the base (10 cm bottle)
-BOTTLE_COM_Z = 0.034  # water sits in the bottom third
-BOTTLE_NECK_R = 0.0115  # neck wall inner face radius
-BOTTLE_NECK_GRASP_Z = 0.068  # neck pinch height above the base
+BOTTLE_NECK_WALL = 0.003
+BOTTLE_NECK_CENTER_R = 0.011  # neck ring centerline radius (reference: 0.0095)
+BOTTLE_NECK_R = BOTTLE_NECK_CENTER_R + BOTTLE_NECK_WALL / 2.0  # outer radius
+BOTTLE_NECK_H = 0.030
+BOTTLE_MOUTH_Z = BOTTLE_NECK_Z + BOTTLE_NECK_H / 2.0  # pour lip above the base
+MUG_WALL_THICKNESS = 0.004
+MUG_LIP_THICKNESS = 0.0045  # the rim band is the mug's tightest constriction
+MUG_INNER_R = MUG_WALL_R - MUG_LIP_THICKNESS / 2.0
+MUG_RIM_Z = 0.078  # wall ring top above the base; the pour lip must clear it
 SOFT_SOLREF = np.array([0.012, 1.0], dtype=np.float64)
 
 
@@ -369,9 +375,9 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         # per-geom masses the handle capsules offset the COM and the mug
         # pivots toward the handle, creeping ~15 cm/min on the soft contacts
         # (measured) — which trips the placement verify's bystander check.
-        _cyl(body, name, 0.025, 0.007, 0.007, 0.0, friction)
-        _ring(body, name, 0.025, 0.004, 0.064, 0.046, 0.0, friction)
-        _ring(body, name, 0.025, 0.0045, 0.003, 0.0645, 0.0, friction)
+        _cyl(body, name, MUG_WALL_R, 0.007, 0.007, 0.0, friction)
+        _ring(body, name, MUG_WALL_R, MUG_WALL_THICKNESS, 0.064, 0.046, 0.0, friction)
+        _ring(body, name, MUG_WALL_R, MUG_LIP_THICKNESS, 0.003, 0.0645, 0.0, friction)
         _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.019], 0.0, friction)
         _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.055], 0.0, friction)
         _capsule(body, name, 0.004, 0.018, [0.047, 0.0, 0.037], 0.0, friction,
@@ -385,22 +391,15 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         )).tolist()
     elif name == "bottle":
         # 10 cm hollow bottle: base, body wall, shoulder step, narrow neck.
-        # Massless geoms plus one explicit inertial, as for the mug: with
-        # per-geom masses the neck and shoulder rings carry two thirds of the
-        # weight and the centre of mass sits 28 mm ABOVE any body-wall grasp
-        # point, so the bottle hangs as a top-heavy pendulum and levers itself
-        # out of the jaws (measured: 0/20 picks). A real bottle's water sits
-        # in its bottom third; the inertial is placed there.
-        _cyl(body, name, BOTTLE_WALL_R, 0.007, 0.007, 0.0, friction)
-        _ring(body, name, BOTTLE_WALL_R, 0.004, 0.041, 0.0275, 0.0, friction)
-        _ring(body, name, 0.024, 0.008, 0.010, 0.053, 0.0, friction)
-        _ring(body, name, 0.013, 0.003, 0.030, 0.073, 0.0, friction)
-        body.explicitinertial = True
-        body.mass = mass_kg
-        body.ipos = [0.0, 0.0, BOTTLE_COM_Z]
-        body.inertia = (mass_kg / 12.0 * np.array(
-            [0.056**2 + 0.100**2, 0.056**2 + 0.100**2, 0.056**2 + 0.056**2]
-        )).tolist()
+        # The neck is the grasp feature: its outer diameter must fit inside the
+        # gripper's fixed-jaw offset (measured 11.9 mm from the tool point), so
+        # it follows the reference bottle's slim neck rather than a scaled-up
+        # one, which the fixed jaw could not descend past.
+        _cyl(body, name, BOTTLE_WALL_R, 0.007, 0.007, per, friction)
+        _ring(body, name, BOTTLE_WALL_R, 0.004, 0.041, 0.0275, per, friction)
+        _ring(body, name, 0.024, 0.008, 0.010, 0.053, per, friction)
+        _ring(body, name, BOTTLE_NECK_CENTER_R, BOTTLE_NECK_WALL, BOTTLE_NECK_H,
+              BOTTLE_NECK_Z, per, friction)
 
 
 def _build_utensil(body, name: str, mass_kg: float, friction) -> None:

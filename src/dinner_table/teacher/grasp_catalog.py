@@ -15,14 +15,10 @@ import numpy as np
 
 from dinner_table.config import DinnerTableError
 from dinner_table.contracts.geometry import ARM_MOUNTS
-from dinner_table.scene.objects import (
-    BOTTLE_NECK_GRASP_Z,
-    BOTTLE_NECK_R,
-    MUG_WALL_R,
-    PLATE_RIM_R,
-)
+from dinner_table.scene.objects import BOTTLE_NECK_R, BOTTLE_NECK_Z, MUG_WALL_R, PLATE_RIM_R
 
 DOWN = np.array([0.0, 0.0, -1.0], dtype=np.float64)
+UP = np.array([0.0, 0.0, 1.0], dtype=np.float64)
 
 
 class GraspCatalogError(DinnerTableError):
@@ -33,9 +29,11 @@ class GraspCatalogError(DinnerTableError):
 class GraspFrame:
     """One grasp: where the ee site goes and how the gripper is oriented.
 
-    position: world-frame ee-site target (m). approach: unit vector the site's
-    +Z (finger direction) must follow. lateral: optional unit vector the site's
-    +X axis must follow (the reference's x_target; None = unconstrained).
+    position: world-frame ee-site target (m). approach: unit vector the site
+    axis ``axis_index`` must follow (+Z, the finger direction, for top-down
+    grasps; +Y, the jaw-spread axis, for the bottle's side grasp). lateral:
+    optional unit vector the site's +X axis must follow (the reference's
+    x_target; None = unconstrained).
     aperture: normalized open aperture during approach. wrist_roll_seed: roll
     value for the IK seed pose. grip_torque: gripper torque saturation (N m).
     hover_m / lift_m: pre-grasp hover and post-grasp lift offsets (m).
@@ -52,6 +50,19 @@ class GraspFrame:
     lift_m: float
     max_tilt_deg: float
     check_upright: bool = True
+    axis_index: int = 2
+
+
+@dataclass(frozen=True)
+class CarryLimits:
+    """Transit tolerances a carried object must stay inside.
+
+    max_tilt_deg: how far the object may lean off its carried attitude.
+    external_force_max: normal force (N) allowed from anything but the jaws.
+    """
+
+    max_tilt_deg: float
+    external_force_max: float
 
 
 def _quat_to_mat(quat: np.ndarray) -> np.ndarray:
@@ -80,6 +91,16 @@ class GraspCatalog:
     # reference's (0, 1, 0) body-X target (our site X negates the gripper X);
     # (0, +1, 0) itself does not solve in our roll basin (verified).
     DRAWER_LATERAL = np.array([0.0, -1.0, 0.0], dtype=np.float64)
+    # Measured jaw envelope in the ee-site frame: the fixed jaw is static with
+    # its tip spheres at site X +0.0119 (outer surface) and its face widening
+    # to +0.0155 by site Z -0.027; the moving jaw sweeps from -0.036 (aperture
+    # 0.30) to +0.0076 (closed). A top-down grasp lets the moving jaw shove the
+    # object against the fixed face, but the bottle's side grasp descends
+    # ACROSS the jaws, so the neck must already clear the fixed face on the way
+    # down or the descent stalls against it (measured: 11 N at the fixed jaw).
+    FIXED_JAW_X = 0.0119
+    NECK_CLEARANCE_M = 0.0015  # gap left between the neck wall and the fixed face
+    NECK_DEPTH_M = 0.008  # how far past the tip line the neck is seated
 
     def frame(self, scene, name: str, arm: str) -> GraspFrame:
         """Return the grasp frame for `name` grasped by `arm`, at its live pose."""
@@ -118,18 +139,15 @@ class GraspCatalog:
         if name == "bottle":
             if upright < 0.5:
                 raise GraspCatalogError("bottle is lying sideways; sideways regrasp unsupported")
-            # Neck pinch from above, at the neck wall's inner face: the mug's
-            # proven sweep-and-seat mechanism applied to the narrow neck. The
-            # body wall cannot be grasped top-down — the jaws descending at
-            # the body radius jam on the shoulder ring and stall the arm
-            # 3-4 cm short of the grasp point (measured, 0/20). Nothing sits
-            # above the neck, so its descent corridor is clear, and the
-            # centre of mass hangs below the pinch. The hover is 0.040, not
-            # the usual 0.055: a neck grasp already sits at table+0.07, and
-            # the SO-101 holds no top-down approach above about table+0.11.
-            position = (pos + self.MUG_LATERAL * BOTTLE_NECK_R
-                        + np.array([0.0, 0.0, BOTTLE_NECK_GRASP_Z]))
-            return GraspFrame(position, DOWN, self.MUG_LATERAL, 0.30, -2.4, 0.7, 0.040, 0.030, 15.0)
+            # Neck side grasp (reference port): the fingers lie horizontal and
+            # close ACROSS the narrow neck, so only the jaw-spread axis (site
+            # Y) is pinned — the reach direction is left to the solver, which
+            # is what makes the pose solvable at all from a front-edge mount.
+            # A top-down wall pinch at the bottle's radius slips: the neck
+            # wall is 3 mm thick and the tall body levers straight out of it.
+            neck = pos + np.array([0.0, 0.0, BOTTLE_NECK_Z])
+            return GraspFrame(neck + self._side_offset(arm, neck), UP, None, 0.30, -1.52,
+                              0.5, 0.055, 0.055, 15.0, axis_index=1)
         # Cutlery rolls when squeezed, so the upright check must not apply
         # (a rolled utensil is still grasped). Descent aperture: wide enough
         # that the arm's servo tracking error (~5-10 mm) cannot land a jaw
@@ -147,6 +165,48 @@ class GraspCatalog:
         # diagonal wedges and snaps the utensil out of the jaws (measured).
         return GraspFrame(position, DOWN, self.UTENSIL_LATERAL, 0.16, -2.4, 1.5,
                           0.025, 0.035, 30.0, check_upright=False)
+
+    CARRY_TILT_DEG = 15.0
+    CUTLERY_CARRY_TILT_DEG = 30.0
+    CARRY_EXTERNAL_FORCE_MAX = 0.10
+
+    def carry_limits(self, name: str) -> CarryLimits:
+        """Transit tolerances for a carried object (the reference's values)."""
+        if name.startswith(("fork", "spoon")):
+            return CarryLimits(self.CUTLERY_CARRY_TILT_DEG, self.CARRY_EXTERNAL_FORCE_MAX)
+        return CarryLimits(self.CARRY_TILT_DEG, self.CARRY_EXTERNAL_FORCE_MAX)
+
+    def side_reach(self, arm: str, target) -> tuple[np.ndarray, np.ndarray]:
+        """Unit reach direction and jaw-spread axis of a side grasp at `target`.
+
+        With the jaw-spread axis pinned horizontal and the reach direction left
+        to the solver, the site frame is fixed up to the reach azimuth, which
+        the arm's shoulder-pan plane sets: it points from the mount to the
+        target. The site X axis is that direction turned a quarter turn about
+        world up.
+        """
+        mount = np.asarray(ARM_MOUNTS[arm], dtype=np.float64)
+        target = np.asarray(target, dtype=np.float64)
+        reach = np.array([target[0] - mount[0], target[1] - mount[1], 0.0])
+        norm = float(np.linalg.norm(reach))
+        if norm < 1e-6:
+            raise GraspCatalogError("side grasp target coincides with the arm mount")
+        reach = reach / norm
+        return reach, np.array([-reach[1], reach[0], 0.0], dtype=np.float64)
+
+    def side_lateral(self, arm: str, target) -> np.ndarray:
+        """Jaw-spread axis of a side grasp at `target` (the tilt axis for a pour)."""
+        return self.side_reach(arm, target)[1]
+
+    def _side_offset(self, arm: str, target: np.ndarray) -> np.ndarray:
+        """Tool-point offset that seats a bottle neck between the open jaws.
+
+        The corrections are built from the reach azimuth alone rather than from
+        a pinned lateral, which would over-constrain a 5-DOF solve.
+        """
+        reach, lateral = self.side_reach(arm, target)
+        neck_x = self.FIXED_JAW_X - BOTTLE_NECK_R - self.NECK_CLEARANCE_M
+        return -neck_x * lateral + self.NECK_DEPTH_M * reach
 
     def _drawer_frame(self, scene) -> GraspFrame:
         sid = mujoco.mj_name2id(scene.model, mujoco.mjtObj.mjOBJ_SITE, "drawer_handle")
