@@ -3,16 +3,16 @@ SEED ?= 42
 SEEDS ?= 0-9
 
 # Targets below run against this tree as it stands: smoke, scene, eval,
-# eval-canonical, bench, videos, demo.
+# eval-canonical, bench, videos, demo, dataset.
 #
-# The plan's dataset-generation, learned-policy evaluation, runtime-integration
-# (`physicalai run`) and release pipelines are not implemented in this tree, so
-# there are deliberately no targets for them here. Previously this file pointed
-# `dataset`, `eval-policy`, `eval`, `demo` and `release` at modules that do not
-# exist (`dinner_table.data.demo_gen`, `dinner_table.eval.harness`,
-# `dinner_table.runtime.demo`, `dinner_table.release`), so every one of those
-# commands died on an ImportError.
-.PHONY: smoke scene eval eval-canonical bench bench-ov videos demo
+# The plan's learned-policy evaluation, runtime-integration (`physicalai run`)
+# and release pipelines are not implemented in this tree, so there are
+# deliberately no targets for them here. Previously this file pointed
+# `eval-policy`, `demo` and `release` at modules that do not exist
+# (`dinner_table.eval.harness`, `dinner_table.runtime.demo`,
+# `dinner_table.release`), so every one of those commands died on an
+# ImportError.
+.PHONY: smoke scene eval eval-canonical bench bench-ov videos demo dataset
 
 smoke:
 	$(PY) python -m dinner_table.smoke
@@ -55,3 +55,10 @@ videos:
 
 # The visible demonstration: rendered episodes plus the scene contact sheet.
 demo: videos scene
+
+# Teacher demonstrations: rolls the oracle under DR and noise, one EpisodeLog
+# JSON per episode under demos/<split>/ plus a run manifest. COUNT=3400 is the
+# full dataset-plan budget (days of CPU); pass a small COUNT for a smoke slice.
+COUNT ?= 3400
+dataset:
+	$(PY) python -m dinner_table.data.demo_gen --config dr_train --count $(COUNT) --out demos

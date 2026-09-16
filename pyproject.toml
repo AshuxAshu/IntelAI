@@ -62,6 +62,7 @@ testpaths = ["tests"]
 markers = [
   "fast: quick unit tests (every push)",
   "slow: integration tests (every push, < 15 min)",
+  "smoke: fast training-path smokes (subset of slow)",
   "nightly: training smokes, parity gates, recovery suite",
   "openvino: requires the OpenVINO runtime",
   "gpu: requires an OpenVINO GPU device",
