@@ -1,7 +1,7 @@
 # Per-seed demonstration videos
 
 Generates the labelled, multi-camera demonstration assets: for every seed, one
-video per *run* that completes on this checkout. Each video shows four camera
+video per *run* that completes on this checkout. Each video shows two camera
 angles with the run's live OpenVINO telemetry underneath.
 
 ## What a video contains
@@ -10,38 +10,78 @@ angles with the run's live OpenVINO telemetry underneath.
 +---------------------------+---------------------------+
 | demo_cam (third-person)   | overhead                  |
 +---------------------------+---------------------------+
-| wrist_A (arm A jaw)       | wrist_B (arm B jaw)       |
-+---------------------------+---------------------------+
 | latency sparkline + p50/p95   | ACT latency by precision  |
 | inferences, ips, CPU%, RSS    | run name, step chips,     |
 | top detections                | phase, t, outcome         |
 +---------------------------+---------------------------+
 ```
 
-* **`Seed-N`** is burned into the top-right of the scene area.
+* **`Seed-N`** is burned into the top-LEFT of the scene area.
 * Every camera panel is **named** (the run's purpose is deliberately *not*
   drawn over the video; it lives in the manifest).
+* The two gripper-bracket (`wrist_A` / `wrist_B`) views are deliberately **not**
+  rendered: each panel costs a full offscreen render per frame, so dropping them
+  roughly halves render time. Add them back by listing them in `PANELS`.
 * The bottom strip is **live OpenVINO telemetry**: the project's real
-  `OpenvinoDetector` (YOLO stand-in on the OpenVINO runtime, CPU) is run
-  against the live overhead camera frame once every `OV_EVERY` physics ticks,
-  and each inference's wall-clock latency is recorded. The sparkline, `p50`,
-  `p95`, inference count and throughput are computed from those in-loop
-  measurements — they are not copied from a report.
+  `OpenvinoDetector` (YOLO stand-in on the OpenVINO runtime) is run against the
+  live overhead camera frame once every `OV_EVERY` physics ticks, and each
+  inference's wall-clock latency is recorded. The sparkline, `p50`, `p95`,
+  inference count and throughput are computed from those in-loop measurements —
+  they are not copied from a report.
 * The ACT bars are a **recorded** reference (this host's committed benchmark
   run), labelled as such in the panel title, so live detector numbers and
   recorded policy numbers are never conflated.
+* **Failures are marked, never hidden.** A run that fails gets a red frame
+  around every panel, a `STEP FAILED: <skill> <object> (arm X)` banner and the
+  attributed `phase/cause`; the failing step's chip is marked `X` in red. A run
+  that completes gets `ALL STEPS COMPLETED`.
+
+## Performance
+
+MuJoCo renders through OpenGL. By default that lands on the Intel iGPU (Mesa),
+which measured **36.5 ms/frame** for two cameras and left the RTX 4050 idle.
+Forcing the NVIDIA GPU via PRIME render offload:
+
+```bash
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia \
+  uv run python scripts/demo/render_demo_videos.py --seeds 0-9
+```
+
+measured **5.5 ms/frame** — a **6.7x** speedup (`GL_RENDERER` confirmed as
+`NVIDIA GeForce RTX 4050 Laptop GPU`). Two further costs were removed:
+
+* Overlay composition was 15.9 ms/frame because `Font.render` dominated it
+  (30 TrueType draws/frame). Text is now pre-rendered once into a cache and
+  **pasted**, and the constant per-video elements (seed badge, panel labels,
+  recorded-bench bars) are baked into small RGBA tiles — a full-frame RGBA
+  composite costs 3.9 ms against 0.7 ms for the tiles. Compose is now
+  **~3-4 ms/frame**.
+* Encoding is only ~5% of the frame cost, and `h264_nvenc` (4.93 ms/frame) is
+  *slower* than `libx264` (3.11 ms/frame) at this resolution, so the encoder was
+  left as `libx264`. The GPU is used where it actually pays: rasterisation.
+
+Live OpenVINO sampling is also pushed off the CPU: `--ov-device GPU` runs the
+detector on the Intel iGPU (measured 34.9 ms vs 45.8 ms on CPU, while leaving
+the CPU free for physics). It remains the bottleneck when enabled — a mug
+episode is ~36 s without sampling and ~55 s with it — so it is the knob to turn
+off (`--no-ov`) if throughput matters more than the live overlay.
+
+Net effect on one mug episode: **300.6 s -> 36.1 s without sampling**, and
+drawer episodes 872 s -> 216 s.
 
 ## Commands
 
 ```bash
-# everything, all 10 seeds (long: ~2-4 h wall)
-uv run python scripts/demo/render_demo_videos.py --seeds 0-9
+# everything, all 10 seeds (GPU-accelerated; ~1-2 h wall)
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia \
+  uv run python scripts/demo/render_demo_videos.py --seeds 0-9 --ov-device GPU
 
 # one run, a few seeds (quick check)
 uv run python scripts/demo/render_demo_videos.py --runs mug --seeds 0-2
 
 # without the live OpenVINO sampling
 uv run python scripts/demo/render_demo_videos.py --no-ov --seeds 0
+
 
 # which runs actually complete, without rendering (fast, no video)
 uv run python scripts/demo/probe_runs.py --seeds 0-9

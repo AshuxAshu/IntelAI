@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import runs as run_registry  # noqa: E402
+import runs as run_registry
 
 RUN_ORDER = ["table_setting", "plate", "mug", "bottle", "drawer", "drawer_fork",
              "attempt_spoon_place", "attempt_bottle_place"]
@@ -30,7 +30,7 @@ def probe_frames(path: Path) -> int:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
              "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=120, check=False,
         )
         return int(out.stdout.strip() or -1)
     except Exception:  # noqa: BLE001

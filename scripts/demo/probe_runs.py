@@ -17,8 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import runs as run_registry  # noqa: E402
-from engine import execute_run  # noqa: E402
+import runs as run_registry
+from engine import execute_run
 
 
 def parse_seed_spec(spec: str) -> list[int]:
