@@ -68,10 +68,13 @@ class GraspCatalog:
     # drawer's open front (over the front wall), not into its back.
     UTENSIL_LATERAL = np.array([1.0, 0.0, 0.0], dtype=np.float64)
     PINCH_OFFSET_M = 0.009  # pinch center ahead of the ee site along site X
-    # The vertical handle bar is pinched across like a utensil capsule; the
-    # (1,0,0) lateral is the only orientation that solves at the drawer's
-    # 25 cm forward depth.
-    DRAWER_LATERAL = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    # The handle is a horizontal east-west bar; the gripper's X axis follows
+    # the drawer's slide axis (site X = -Y world) so the closing faces squeeze
+    # across the bar's diameter along the pull direction and the front run-in
+    # seats the bar between the open jaws. This is the -X sign of the
+    # reference's (0, 1, 0) body-X target (our site X negates the gripper X);
+    # (0, +1, 0) itself does not solve in our roll basin (verified).
+    DRAWER_LATERAL = np.array([0.0, -1.0, 0.0], dtype=np.float64)
 
     def frame(self, scene, name: str, arm: str) -> GraspFrame:
         """Return the grasp frame for `name` grasped by `arm`.
@@ -89,7 +92,7 @@ class GraspCatalog:
         pos, quat = scene.object_pose(name)
         upright = float(_quat_to_mat(quat)[2, 2])
         if name == "plate":
-            position = pos + self.PLATE_LATERAL * PLATE_RIM_R + np.array([0.0, 0.0, 0.017])
+            position = pos + self.PLATE_LATERAL * PLATE_RIM_R + np.array([0.0, 0.0, 0.009])
             return GraspFrame(position, DOWN, self.PLATE_LATERAL, 0.30, -2.4, 0.7, 0.055, 0.055, 15.0)
         if name == "mug":
             # Wall pinch at the diagonal (reference port): the moving jaw
@@ -97,7 +100,7 @@ class GraspCatalog:
             # seats against the fixed jaw, and the full-duration saturated
             # close squeezes. The handle is NOT graspable with this gripper:
             # the moving-jaw mesh sweeps the mug wall on the way in.
-            position = pos + self.MUG_LATERAL * (MUG_WALL_R - 0.002) + np.array([0.0, 0.0, 0.041])
+            position = pos + self.MUG_LATERAL * (MUG_WALL_R - 0.002) + np.array([0.0, 0.0, 0.033])
             return GraspFrame(position, DOWN, self.MUG_LATERAL, 0.30, -2.4, 0.7, 0.055, 0.035, 15.0)
         if name == "bottle":
             if upright < 0.5:
@@ -107,24 +110,33 @@ class GraspCatalog:
             # reliable — the neck side-grasp needs a solver mode that pins
             # only the gripper-Y axis; tracked in PLAN_AMENDMENTS.
             position = (pos + self.MUG_LATERAL * (BOTTLE_WALL_R - 0.002)
-                        + np.array([0.0, 0.0, 0.030]))
+                        + np.array([0.0, 0.0, 0.022]))
             return GraspFrame(position, DOWN, self.MUG_LATERAL, 0.30, -2.4, 0.7, 0.055, 0.035, 15.0)
-        # Capsules are rotationally symmetric: squeezing them rolls them, so
-        # the upright check must not apply (a rolled utensil is still grasped).
-        # Descent aperture: wide enough that the arm's servo tracking error
-        # (~5-10 mm) cannot land a jaw face on the capsule, narrow enough to
-        # clear the neighboring utensil columns (5 cm apart).
-        position = pos + np.array([0.0, 0.0, 0.009])
-        return GraspFrame(position, DOWN, self.UTENSIL_LATERAL, 0.16, -2.4, 0.5,
+        # Cutlery rolls when squeezed, so the upright check must not apply
+        # (a rolled utensil is still grasped). Descent aperture: wide enough
+        # that the arm's servo tracking error (~5-10 mm) cannot land a jaw
+        # face on the handle, narrow enough to clear the neighboring columns
+        # (~3.5 cm apart). The site offset puts the jaw tip band (straddling
+        # the site by +/-2.5 mm) across the handle's mid-height; pinching
+        # lower puts the COM above the contacts (the utensil pitches out
+        # mid-carry) and pinching at the upper band slips the tips off the
+        # handle's top edge (both measured).
+        position = pos + np.array([0.0, 0.0, 0.007])
+        # Close and carry at a firm-but-not-maximal clamp (the reference
+        # commands CLOSED throughout): 1.5 N m holds the ~0.2 N utensil with
+        # a 40x friction margin, while the full 2.94 N m clamp chatters the
+        # tip contacts at ~37 N and ratchets the handle's roll until its
+        # diagonal wedges and snaps the utensil out of the jaws (measured).
+        return GraspFrame(position, DOWN, self.UTENSIL_LATERAL, 0.16, -2.4, 1.5,
                           0.025, 0.035, 30.0, check_upright=False)
 
     def _drawer_frame(self, scene) -> GraspFrame:
         sid = mujoco.mj_name2id(scene.model, mujoco.mjtObj.mjOBJ_SITE, "drawer_handle")
         if sid == -1:
             raise GraspCatalogError("drawer_handle site missing from scene")
+        # The tool point goes directly on the horizontal bar's center; the
+        # fingers straddle it vertically and the servo close squeezes across
+        # the slide axis. grip_torque records the reference's telemetry value
+        # only — the drawer skills close with the plain (force-clamped) servo.
         bar = np.array(scene.data.site_xpos[sid], dtype=np.float64)
-        # The site sits 9 mm west of the bar plus the vertical pinch offset:
-        # the claw's pinch center is +9 mm along the site X (lateral +X), so
-        # this lands the pinch exactly on the vertical bar.
-        position = bar + np.array([-self.PINCH_OFFSET_M, 0.0, 0.0055])
-        return GraspFrame(position, DOWN, self.DRAWER_LATERAL, 0.30, -2.4, 0.15, 0.025, 0.040, 15.0)
+        return GraspFrame(bar, DOWN, self.DRAWER_LATERAL, 0.30, -2.4, 0.15, 0.040, 0.040, 15.0)

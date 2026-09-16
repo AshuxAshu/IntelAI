@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Iterator
 
+import mujoco
 import numpy as np
 
 from dinner_table.contracts.geometry import (
@@ -26,13 +27,38 @@ from dinner_table.teacher.grasp_catalog import GraspCatalog, GraspFrame
 from dinner_table.teacher.ik import IKUnreachable
 from dinner_table.teacher.kinematics import arm_q, site_pose
 
-OBJECT_HALF_HEIGHTS = {"plate": 0.012, "mug": 0.04, "bottle": 0.07}
+# Every catalog object's body origin rests at its base: a placed object's
+# target height is the supporting surface, not surface + half-height.
+PLACE_Z = {"table": TABLE_TOP_HEIGHT, "drawer": 0.385}
 # The neck pinch rides a 3 cm wall: the lift must stay on the neck, so
 # only ~1.2 cm of base clearance is available — enough for a checked transit.
-LIFT_MIN = {"bottle": 0.012}
+# Cutlery: the eastern drawer columns' IK ceiling caps a pure-vertical lift
+# at ~13-19 mm; the transit clearance is established by Place's carry rise
+# instead (the drawer is still open at pick time, so nothing is transited).
+LIFT_MIN = {
+    "bottle": 0.012,
+    "fork_1": 0.012, "fork_2": 0.012, "spoon_1": 0.012, "spoon_2": 0.012,
+}
 DEFAULT_LIFT_MIN = 0.02
+# Base radii for the flatten-shift correction: a hollow vessel delivered
+# tilted (the side-wall pinch hangs it a few degrees off vertical — the
+# grasp-point lever is inherent) lands on its rim edge and flattens on
+# release, shifting its base center by radius*sin(tilt) along the lean.
+BASE_RADIUS = {"plate": 0.09, "mug": 0.04, "bottle": 0.03}
 # The reference teacher's carried-object graze tolerance.
 EXTERNAL_FORCE_MAX = 0.10
+# The plate's rim tube is smooth: a 0.7 N m saturated press lets the
+# swinging rim slide out of the jaws mid-transit (measured). The reference
+# carries with the full force-clamped servo (2.94 N m) and the rigid rim
+# takes it — the close stays at the tuned 0.7 (a full close ejects the
+# plate against the table at grasp time). Cutlery rides the protruding jaw
+# tip spheres (narrow boxes never reach the jaw faces): only the full
+# clamp drives the tips in deep enough to resist the box hinging on the
+# point contacts (measured: 0.5 N m carry loses the moving jaw mid-transit).
+CARRY_GRIP_TORQUE = {
+    "plate": 2.94,
+    "fork_1": 2.94, "fork_2": 2.94, "spoon_1": 2.94, "spoon_2": 2.94,
+}
 
 
 class Skill:
@@ -272,22 +298,68 @@ class Pick(Skill):
             raise SkillFailed("pick", "close", "missed_grasp")
         ctx.carrying[self.arm] = self.object_name
         self._set_phase("lift")
-        # Lift-height ladder: high grasps (the bottle neck) sit near the top of
-        # the constrained envelope, so back the lift off until IK solves; the
-        # object only needs enough clearance for a checked horizontal transit.
-        lifted = False
-        lift_height = frame.lift_m
-        while lift_height >= 0.008 - 1e-9:
-            lift_end = frame.position + np.array([0.0, 0.0, lift_height])
-            try:
-                yield from ctx.play_cartesian(self.arm, lift_end, frame.approach,
-                                              frame.lateral, 5.0)
-                lifted = True
-                break
-            except (SkillFailed, IKUnreachable):
-                lift_height -= 0.005
-        if not lifted:
-            raise SkillFailed("pick", "lift", "ik_unreachable")
+        # Keep the saturated close pressing through the lift: once the close
+        # generator exits, a plain servo at the resting aperture exerts no
+        # steady-state squeeze — the contact decays over ~1 s and a smooth
+        # object on the jaw tips (a cutlery box) slides out mid-lift
+        # (measured: jaws 6 -> 2.3 N, then dropped). The standalone pick
+        # never saw this because the episode ended at the verify before the
+        # carry audit could fire.
+        with ctx.grip_saturation(self.arm,
+                                 CARRY_GRIP_TORQUE.get(self.object_name,
+                                                       frame.grip_torque)):
+            # Lift-height ladder: high grasps (the bottle neck) sit near the
+            # top of the constrained envelope, so back the lift off until IK
+            # solves; the object only needs enough clearance for a checked
+            # horizontal transit. Cutlery lifts straight up first (inside the
+            # caddy, under the roof), then EXITS south over the open front
+            # wall to a high outside point — fully clear of the drawer before
+            # anything else moves (the reference's clearance stage; the
+            # in-caddy envelope is roof-capped ~0.43 while south of the
+            # drawer the arm reaches 0.46+).
+            lifted = False
+            lift_height = frame.lift_m
+            while lift_height >= 0.008 - 1e-9:
+                lift_end = frame.position + np.array([0.0, 0.0, lift_height])
+                try:
+                    start = site_pose(ctx.data, f"{self.arm}.ee")[0]
+                    pts = ctx.plan_cartesian(self.arm, start, lift_end,
+                                             frame.approach, frame.lateral)
+                    ctx.check_path(self.arm, pts)
+                    grip = ctx._grip_now[self.arm]
+                    yield from ctx.play(self.arm, pts, grip, grip, 5.0)
+                    # Converge on the commanded lift before measuring it: the
+                    # playback clock ends with the servo still short of the
+                    # last waypoint, and reading the lagged pose fails deep
+                    # reaches spuriously (the drawer columns lift only ~70%
+                    # at the tick).
+                    yield from ctx.hold(self.arm, pts[-1], 0.6)
+                    lifted = True
+                    break
+                except (SkillFailed, IKUnreachable):
+                    lift_height -= 0.005
+            if not lifted:
+                raise SkillFailed("pick", "lift", "ik_unreachable")
+            if self.object_name.startswith(("fork", "spoon")):
+                exited = False
+                site_now, _ = site_pose(ctx.data, f"{self.arm}.ee")
+                for out_y, out_z in ((0.13, 0.44), (0.13, 0.43), (0.10, 0.44),
+                                     (0.10, 0.43), (0.10, 0.42)):
+                    exit_pt = np.array([site_now[0], site_now[1] - out_y, out_z])
+                    try:
+                        start = site_pose(ctx.data, f"{self.arm}.ee")[0]
+                        pts = ctx.plan_cartesian(self.arm, start, exit_pt,
+                                                 frame.approach, None)
+                        ctx.check_path(self.arm, pts)
+                        grip = ctx._grip_now[self.arm]
+                        yield from ctx.play(self.arm, pts, grip, grip, 4.0)
+                        yield from ctx.hold(self.arm, pts[-1], 0.4)
+                        exited = True
+                        break
+                    except (SkillFailed, IKUnreachable):
+                        continue
+                if not exited:
+                    raise SkillFailed("pick", "lift", "ik_unreachable")
         self._set_phase("verify")
         pos, _ = ctx.object(self.object_name)
         lift = float(pos[2]) - self._origin_z
@@ -312,17 +384,38 @@ class Place(Skill):
             if self.target not in PLACEMATS:
                 raise SkillFailed("place", "carry", f"unknown target {self.target}")
             px, py, _ = PLACEMATS[self.target]
-            z = TABLE_TOP_HEIGHT + OBJECT_HALF_HEIGHTS.get(self.object_name, 0.008)
-            return np.array([px, py, z])
+            return np.array([px, py, PLACE_Z["table"]])
+        # Anchor-relative target: the offset rides the anchor's yaw so the
+        # placement stays correct however the anchor sits (§10.5 semantics;
+        # the teacher mirrors the runtime's perceived-anchor resolution).
         rel = self.target
         anchor_pos, anchor_rot_quat = ctx.object(rel["anchor"])
-        import mujoco
-
         mat = np.zeros(9, dtype=np.float64)
         mujoco.mju_quat2Mat(mat, np.asarray(anchor_rot_quat, dtype=np.float64))
-        offset = 0.14 * np.array([-1.0, 0.0, 0.0])
-        z = TABLE_TOP_HEIGHT + OBJECT_HALF_HEIGHTS.get(self.object_name, 0.008)
-        return np.array([anchor_pos[0] + offset[0], anchor_pos[1] + offset[1], z])
+        anchor_yaw = np.arctan2(mat.reshape(3, 3)[1, 0], mat.reshape(3, 3)[0, 0])
+        offset = 0.14 * np.array([np.cos(anchor_yaw + np.pi), np.sin(anchor_yaw + np.pi), 0.0])
+        return np.array([
+            anchor_pos[0] + offset[0], anchor_pos[1] + offset[1], PLACE_Z["table"],
+        ])
+
+    def _flatten_shift(self, obj_quat: np.ndarray) -> np.ndarray:
+        """Predicted horizontal shift when a leaning vessel rocks flat.
+
+        A tilted cylinder lands on its rim edge; flattening rotates the base
+        center toward the lean by radius*sin(tilt). Zero for objects without
+        a cataloged base radius (cutlery rolls negligibly).
+        """
+        radius = BASE_RADIUS.get(self.object_name)
+        if radius is None:
+            return np.zeros(3)
+        mat = np.zeros(9, dtype=np.float64)
+        mujoco.mju_quat2Mat(mat, np.asarray(obj_quat, dtype=np.float64))
+        lean = np.array(mat.reshape(3, 3)[:2, 2], dtype=np.float64)  # up-axis xy
+        norm = float(np.linalg.norm(lean))
+        if norm < 1e-6:
+            return np.zeros(3)
+        tilt = float(np.arctan2(norm, abs(float(mat.reshape(3, 3)[2, 2]))))
+        return radius * np.sin(tilt) * np.array([lean[0], lean[1], 0.0]) / norm
 
     def run(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
         if ctx.carrying.get(self.arm) != self.object_name:
@@ -332,46 +425,199 @@ class Place(Skill):
             name: np.array(ctx.object(name)[0])
             for name in ("plate", "mug", "bottle", "fork_1", "fork_2", "spoon_1", "spoon_2")
             if name != self.object_name
+            # Drawer-resident cutlery legitimately moves with the drawer
+            # (the servo close after retrieval slides it); it is only
+            # checked when the placed object is NOT cutlery.
+            and not (self.object_name.startswith(("fork", "spoon"))
+                     and name.startswith(("fork", "spoon")))
         }
         target = self._target_xyz(ctx)
+        # Carry in the grasp orientation: the cataloged lateral pins the wrist
+        # roll through every carried motion — an unconstrained roll twists the
+        # grasp until a jaw unloads (measured: 0/4 for every object).
+        frame = self.catalog.frame(ctx.scene, self.object_name, self.arm)
         self._set_phase("carry")
         site_pos, _ = site_pose(ctx.data, f"{self.arm}.ee")
         offset = site_pos - frame_pos
-        align = np.array([target[0], target[1], float(site_pos[2])])
-        yield from ctx.play_cartesian(self.arm, align, np.array([0.0, 0.0, -1.0]),
-                                      None, 4.0)
-        self._set_phase("hover")
-        ee_end = target + offset
-        pts = ctx.plan_cartesian(self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0], ee_end,
-                                 np.array([0.0, 0.0, -1.0]), None)
-        ctx.check_path(self.arm, pts)
-        self._set_phase("descend")
-        grip = ctx._hold[self.arm][5]
-        motion = ctx.play(self.arm, pts, grip, grip, 4.0)
-        supported = False
-        for action in motion:
-            ctx.step(action)
-            pos, _ = ctx.object(self.object_name)
-            if (ctx.object_support_force(self.object_name) > 0.06
-                    and abs(float(pos[2]) - target[2]) < 0.004):
-                supported = True
-                break
-        if not supported:
-            pos, _ = ctx.object(self.object_name)
-            if not (ctx.object_support_force(self.object_name) > 0.06
-                    and abs(float(pos[2]) - target[2]) < 0.006):
-                raise SkillFailed("place", "descend", "no_support")
+        # Hold an active squeeze through every carried motion (the reference
+        # carries with the servo commanded closed): a plain servo at the
+        # resting aperture lets a swinging rim pinch or a grazed utensil tip
+        # unload a jaw mid-transit (measured: plate and fork, 0/4 each).
+        with ctx.grip_saturation(self.arm,
+                                 CARRY_GRIP_TORQUE.get(self.object_name,
+                                                       frame.grip_torque)):
+            # Rise to the carry line before transiting: a fork lifted only to
+            # its pick height rides AT the drawer walls' tops, and the servo
+            # drawer-close then shoves it north in the grip (measured). The
+            # line is ABSOLUTELY capped ~5 mm inside the constrained-IK
+            # ceiling: a warm-chained rise plan can solve past the ceiling,
+            # but the executed corner pose (wrist_flex at its limit) cannot
+            # be re-solved by any later plan — the align then fails at every
+            # height (measured).
+            carry_cap = TABLE_TOP_HEIGHT + 0.068
+            for rise in (0.020, 0.015, 0.010, 0.005):
+                target_z = min(float(site_pos[2]) + rise, carry_cap)
+                if target_z <= float(site_pos[2]) + 1e-6:
+                    break
+                try:
+                    yield from ctx.play_cartesian(
+                        self.arm, np.array([site_pos[0], site_pos[1], target_z]),
+                        frame.approach, frame.lateral, 1.5,
+                    )
+                    break
+                except (IKUnreachable, SkillFailed):
+                    continue
+            site_pos, _ = site_pose(ctx.data, f"{self.arm}.ee")
+            if self.object_name.startswith(("fork", "spoon")):
+                # The open drawer's front wall crosses the cutlery placement
+                # band beside the plate; slide the drawer closed by servo
+                # before transiting (arm A is holding the utensil, so the
+                # physical CloseDrawer grasp is not an option). The carried
+                # utensil rides above the wall tops at the carry line.
+                yield from ctx.servo_close_drawer(self.arm)
+            # Align the GRASP POINT over the target (target + grasp offset):
+            # the site must not go to the placemat center itself — a rim pinch
+            # then hangs a plate one rim-radius off and the diagonal descent
+            # swings the grasp loose (measured). The transit runs at the
+            # reference's cutlery speed (~3 cm/s): a 4 s sprint quadruples
+            # the carried pendulum's swing energy and rolls a clamped
+            # utensil's handle until it snaps out of the jaws (measured).
+            # Where the carry line rides at the arm's IK ceiling (the deep
+            # columns), step the align height down until the plan solves —
+            # the drawer is closed by now, so the transit is clear at any
+            # height above the table. Cutlery transits with the lateral
+            # relaxed (approach-down only): the deep west columns' corner
+            # does not solve with the wrist pinned, and a friction-held box
+            # between the jaw tips does not care about wrist orientation.
+            is_cutlery = self.object_name.startswith(("fork", "spoon"))
+            transit_lateral = None if is_cutlery else frame.lateral
+            align_xy = (target[0] + offset[0], target[1] + offset[1])
+            align_z = float(site_pos[2])
+            aligned = False
+            while align_z >= TABLE_TOP_HEIGHT + 0.05 - 1e-9:
+                try:
+                    yield from ctx.play_cartesian(
+                        self.arm, np.array([align_xy[0], align_xy[1], align_z]),
+                        frame.approach, transit_lateral, 7.0,
+                    )
+                    aligned = True
+                    break
+                except IKUnreachable:
+                    align_z -= 0.005
+            if not aligned:
+                raise SkillFailed("place", "carry", "ik_unreachable")
+            self._set_phase("hover")
+            # Sample the grasp offset across the carried object's swing
+            # rather than waiting the swing out: the mean over ~1 s equals
+            # the equilibrium hang (the pendulum is symmetric), and a long
+            # dead hold only grinds the plate's rim tube between the
+            # clamped jaws until it escapes (measured: 3 s hold, 2/4 seeds).
+            hold_q = arm_q(ctx.data, self.arm)
+            samples: list[np.ndarray] = []
+            sample_end = float(ctx.data.time) + 1.0
+            while float(ctx.data.time) < sample_end:
+                yield from ctx.hold(self.arm, hold_q, 0.1)
+                s_pos, _ = site_pose(ctx.data, f"{self.arm}.ee")
+                o_pos, _ = ctx.object(self.object_name)
+                samples.append(s_pos - o_pos)
+            # A leaning vessel is delivered short of the target by its
+            # predicted flatten shift so it settles ON the target when the
+            # release lets it rock flat. The last 2 mm is a deliberate
+            # press: an object delivered exactly to its rest height only
+            # grazes the surface with ~0 N support while the grip still
+            # carries its weight (measured on the fork). The offset is the
+            # MEDIAN across the swing — a mean is inflated by the pendulum
+            # extremes (measured: a swinging spoon produced an 8 cm offset
+            # and an unreachable descent target).
+            obj_quat = ctx.object(self.object_name)[1]
+            ee_end = (target + np.median(samples, axis=0)
+                      - self._flatten_shift(obj_quat)
+                      - np.array([0.0, 0.0, 0.002]))
+            try:
+                pts = ctx.plan_cartesian(self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0],
+                                         ee_end, frame.approach, frame.lateral)
+            except IKUnreachable as exc:
+                raise SkillFailed("place", "hover", "ik_unreachable") from exc
+            ctx.check_path(self.arm, pts)
+            self._set_phase("descend")
+            grip = ctx._grip_now[self.arm]
+            motion = ctx.play(self.arm, pts, grip, grip, 4.0)
+
+            def seated() -> bool:
+                # Near-flat on the surface with real support: a first
+                # rim-edge touch leaves hollow vessels tilted a few degrees
+                # and a couple mm high — the flatten happens on release
+                # (predicted and pre-compensated above).
+                pos, _ = ctx.object(self.object_name)
+                return (ctx.object_support_force(self.object_name) > 0.06
+                        and abs(float(pos[2]) - target[2]) < 0.003)
+
+            supported = False
+            for action in motion:
+                ctx.step(action)
+                if seated():
+                    supported = True
+                    break
+            if not supported:
+                # The playback clock ends with the servo short of the last
+                # waypoint; hold the drop target until the object seats (or
+                # genuinely never touches).
+                hold_end = float(ctx.data.time) + 1.5
+                while float(ctx.data.time) < hold_end:
+                    yield ctx.action(self.arm, pts[-1], grip)
+                    if seated():
+                        supported = True
+                        break
+            if not supported:
+                pos, _ = ctx.object(self.object_name)
+                if not (ctx.object_support_force(self.object_name) > 0.06
+                        and abs(float(pos[2]) - target[2]) < 0.003):
+                    raise SkillFailed("place", "descend", "no_support")
         self._set_phase("release")
-        yield from ctx.open_gripper(self.arm, 0.30, 0.8)
+        # End the carry BEFORE opening: the grasp audit must not read the
+        # intentional release as a fumbled grasp, and the exit's scratch
+        # audit must treat the placed object as world, not cargo. Open
+        # slowly (the reference's 3 s release): a fast open throws the
+        # just-supported object ~6 mm as the pinch preload relaxes
+        # (measured on the mug).
         ctx.carrying[self.arm] = None
-        yield from ctx.play_cartesian(
-            self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0] + np.array([0.0, 0.0, 0.035]),
-            np.array([0.0, 0.0, -1.0]), None, 2.0,
-        )
-        yield from ctx.play_joint(self.arm, np.array(HOME_JOINTS[self.arm][:5]), 3.0)
+        yield from ctx.open_gripper(self.arm, 0.30, 3.0)
+        # Rise well clear of the placed object before the home sweep: the
+        # joint arc dips a few mm early on and the jaw tips catch the rim of
+        # a just-placed mug (measured: hooked at site z 0.444 vs rim 0.435).
+        for rise in (0.06, 0.05, 0.04, 0.03):
+            try:
+                yield from ctx.play_cartesian(
+                    self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0]
+                    + np.array([0.0, 0.0, rise]),
+                    frame.approach, frame.lateral, 2.0,
+                )
+                break
+            except (IKUnreachable, SkillFailed):
+                continue
+        # Home along a checked path; if the arc would clip the placed object
+        # (or anything else), retreat toward the table edge and re-plan.
+        q_home = np.array(HOME_JOINTS[self.arm][:5])
+
+        def home_points() -> np.ndarray:
+            q_start = arm_q(ctx.data, self.arm)
+            n = max(8, int(np.max(np.abs(q_home - q_start)) / 0.035) + 2)
+            return np.linspace(q_start, q_home, n)
+
+        try:
+            home_pts = home_points()
+            ctx.check_path(self.arm, home_pts)
+        except SkillFailed:
+            back = site_pose(ctx.data, f"{self.arm}.ee")[0] + np.array([0.0, -0.10, 0.0])
+            yield from ctx.play_cartesian(self.arm, back, frame.approach,
+                                          frame.lateral, 2.5)
+            home_pts = home_points()
+            ctx.check_path(self.arm, home_pts)
+        grip_now = ctx._grip_now[self.arm]
+        yield from ctx.play(self.arm, home_pts, grip_now, grip_now, 3.0)
         self._set_phase("verify")
         for _ in range(12):  # 0.5 s settle window
-            yield ctx.action(self.arm, arm_q(ctx.data, self.arm), ctx._hold[self.arm][5])
+            yield ctx.action(self.arm, arm_q(ctx.data, self.arm), ctx._grip_now[self.arm])
         pos, _ = ctx.object(self.object_name)
         xy_err = float(np.linalg.norm(pos[:2] - target[:2]))
         z_err = abs(float(pos[2]) - target[2])
@@ -380,7 +626,9 @@ class Place(Skill):
             (float(np.linalg.norm(np.array(ctx.object(n)[0]) - p)) for n, p in others.items()),
             default=0.0,
         )
-        if xy_err > 0.008 or z_err > 0.004 or upright < 0.95 or disturbed > 0.005:
+        if xy_err > 0.006 or z_err > 0.003 or disturbed > 0.004:
+            raise SkillFailed("place", "verify", "misplaced")
+        if frame.check_upright and upright < 0.98:
             raise SkillFailed("place", "verify", "misplaced")
 
 
@@ -417,8 +665,14 @@ class OpenDrawer(Skill):
             yield from ctx.play_cartesian(self.arm, frame.position, frame.approach,
                                           frame.lateral, 3.0)
             self._set_phase("close")
-            yield from ctx.close_gripper(self.arm, frame.grip_torque, seconds=6.0,
-                                        object_name="drawer_top")
+            # Full-servo close (reference port): the STS-3215 servo is
+            # force-clamped at 2.94 N m, so holding the fully-closed target
+            # keeps a firm squeeze on the handle through the pull. The
+            # torque-saturated close used for gram-scale objects would decay
+            # the moment the drawer's drag loads the jaws (measured).
+            q_now = arm_q(ctx.data, self.arm)
+            yield from ctx.play(self.arm, np.vstack([q_now, q_now]),
+                                ctx._grip_now[self.arm], 0.0, 4.0)
             fixed, moving = ctx.finger_forces(self.arm, "drawer_top")
             if min(fixed, moving) <= 0.08:
                 raise SkillFailed("open_drawer", "close", "missed_grasp")
@@ -433,16 +687,32 @@ class OpenDrawer(Skill):
                                           frame.approach, frame.lateral,
                                           q_start=arm_q(ctx.data, self.arm))
             ctx.check_path(self.arm, pull_pts, drawer_follow=True)
-            grip = ctx._grip_now[self.arm]
-            yield from ctx.play(self.arm, pull_pts, grip, grip, 6.0)
+            yield from ctx.play(self.arm, pull_pts, 0.0, 0.0, 6.0)
             self._set_phase("verify")
             if ctx.drawer_opening() < 0.88 * DRAWER_TRAVEL:
                 raise SkillFailed("open_drawer", "verify", "jammed")
-            yield from ctx.open_gripper(self.arm, 0.30, 1.0)
+            # End the carry BEFORE opening: the grasp audit must not read the
+            # intentional release as a fumbled grasp.
             ctx.carrying[self.arm] = None
-            retract = site_pose(ctx.data, f"{self.arm}.ee")[0] + np.array([0.0, 0.0, 0.04])
-            yield from ctx.play_cartesian(self.arm, retract, frame.approach, None, 3.0)
-            yield from ctx.play_joint(self.arm, np.array(HOME_JOINTS[self.arm][:5]), 3.0)
+            # Hold the drawer open via its servo before releasing: while the
+            # neutral hold is active the drawer is effectively free and the
+            # withdrawing arm's drag slides it shut (measured).
+            ctx.hold_drawer_open()
+            yield from ctx.open_gripper(self.arm, 0.30, 1.0)
+            # Withdraw along a checked joint path home: a constrained
+            # Cartesian retract at the pulled handle position can sit past
+            # the approach-down IK envelope (measured after the site-depth
+            # alignment); the joint arc clears it and is contact-audited.
+            try:
+                home_pts = np.linspace(
+                    arm_q(ctx.data, self.arm),
+                    np.array(HOME_JOINTS[self.arm][:5]), 12,
+                )
+                ctx.check_path(self.arm, home_pts)
+            except SkillFailed as exc:
+                raise SkillFailed("drawer", "verify", "path_blocked") from exc
+            grip_now = ctx._grip_now[self.arm]
+            yield from ctx.play(self.arm, home_pts, grip_now, grip_now, 3.0)
         finally:
             ctx.drawer_neutral = False
             ctx.allowed[self.arm] = set()
@@ -457,6 +727,14 @@ class CloseDrawer(OpenDrawer):
         opening = ctx.drawer_opening()
         if opening < 0.8 * DRAWER_TRAVEL:
             raise SkillFailed("close_drawer", "pregrasp", "already_closed")
+        # The OPEN handle sits deep past the arm's approach-down grasp
+        # envelope (too close to the base; measured). Servo-draw the drawer
+        # to mid-travel first so the handle returns to the proven grasp
+        # band, then finish the last stretch with the physical handle push.
+        GRASP_BAND_OPENING = 0.06
+        if opening > GRASP_BAND_OPENING:
+            yield from ctx.servo_close_drawer(self.arm, target_opening=GRASP_BAND_OPENING)
+            opening = ctx.drawer_opening()
         ctx.allowed[self.arm] = {"drawer_top", "cabinet"}
         try:
             frame = self.catalog.frame(ctx.scene, "drawer_top", self.arm)
@@ -468,16 +746,28 @@ class CloseDrawer(OpenDrawer):
             # shove is corrected by the live re-plan before the descend.
             ctx.allowed[self.arm].add(self.object_name)
             self._set_phase("approach")
-            q_hover = ctx.plan_ik(self.arm, hover, frame.approach, frame.lateral,
+            # Approach via the front waypoint (OpenDrawer's proven chain): at
+            # the OPEN handle's deep-south position the hover does not solve
+            # from a cold home seed, but the closer front point does and the
+            # warm-chained hover follows.
+            front = hover + np.array([0.0, -0.05, 0.0])
+            q_front = ctx.plan_ik(self.arm, front, frame.approach, frame.lateral,
                                   seed=self._home_seed(frame))
-            approach_pts = np.linspace(arm_q(ctx.data, self.arm), q_hover, 12)
+            q_hover = ctx.plan_ik(self.arm, hover, frame.approach, frame.lateral,
+                                  seed=q_front)
+            approach_pts = np.linspace(arm_q(ctx.data, self.arm), q_front, 12)
             ctx.check_path(self.arm, approach_pts)
             yield from ctx.play(self.arm, approach_pts, frame.aperture, frame.aperture, 3.0)
+            yield from ctx.play_cartesian(self.arm, hover, frame.approach,
+                                          frame.lateral, 2.0)
             yield from ctx.play_cartesian(self.arm, frame.position, frame.approach,
                                           frame.lateral, 3.0)
             self._set_phase("close")
-            yield from ctx.close_gripper(self.arm, frame.grip_torque, seconds=6.0,
-                                        object_name="drawer_top")
+            # Full-servo close, as in OpenDrawer: the force-clamped servo holds
+            # the squeeze on the handle through the push.
+            q_now = arm_q(ctx.data, self.arm)
+            yield from ctx.play(self.arm, np.vstack([q_now, q_now]),
+                                ctx._grip_now[self.arm], 0.0, 4.0)
             fixed, moving = ctx.finger_forces(self.arm, "drawer_top")
             if min(fixed, moving) <= 0.08:
                 raise SkillFailed("close_drawer", "close", "missed_grasp")
@@ -485,16 +775,30 @@ class CloseDrawer(OpenDrawer):
             self._set_phase("push")
             ctx.drawer_neutral = True
             push_end = frame.position + np.array([0.0, opening - 0.004, 0.0])
+            # _grip_now is 0.0 from the close: play_cartesian holds the
+            # fully-closed servo target through the push.
             yield from ctx.play_cartesian(self.arm, push_end, frame.approach,
                                           frame.lateral, 6.0)
             self._set_phase("verify")
             if ctx.drawer_opening() > 0.12 * DRAWER_TRAVEL:
                 raise SkillFailed("close_drawer", "verify", "jammed")
-            yield from ctx.open_gripper(self.arm, 0.30, 1.0)
+            # End the carry BEFORE opening (grasp-audit exemption; see OpenDrawer).
             ctx.carrying[self.arm] = None
-            retract = site_pose(ctx.data, f"{self.arm}.ee")[0] + np.array([0.0, 0.0, 0.04])
-            yield from ctx.play_cartesian(self.arm, retract, frame.approach, None, 3.0)
-            yield from ctx.play_joint(self.arm, np.array(HOME_JOINTS[self.arm][:5]), 3.0)
+            yield from ctx.open_gripper(self.arm, 0.30, 1.0)
+            # Withdraw along a checked joint path home: a constrained
+            # Cartesian retract at the pulled handle position can sit past
+            # the approach-down IK envelope (measured after the site-depth
+            # alignment); the joint arc clears it and is contact-audited.
+            try:
+                home_pts = np.linspace(
+                    arm_q(ctx.data, self.arm),
+                    np.array(HOME_JOINTS[self.arm][:5]), 12,
+                )
+                ctx.check_path(self.arm, home_pts)
+            except SkillFailed as exc:
+                raise SkillFailed("drawer", "verify", "path_blocked") from exc
+            grip_now = ctx._grip_now[self.arm]
+            yield from ctx.play(self.arm, home_pts, grip_now, grip_now, 3.0)
         finally:
             ctx.drawer_neutral = False
             ctx.allowed[self.arm] = set()

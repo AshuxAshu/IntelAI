@@ -58,6 +58,7 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
   "fast: quick unit tests (every push)",
   "slow: integration tests (every push, < 15 min)",

@@ -10,6 +10,8 @@ saturation of the gripper position servo.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import mujoco
 import numpy as np
 
@@ -84,12 +86,25 @@ class TeacherContext:
         self._jaw_geoms: dict[str, set[int]] = {arm: set() for arm in ARM_NAMES}
         for i in range(m.ngeom):
             body = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, int(m.geom_bodyid[i])) or ""
-            gname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, i) or ""
             for arm in ARM_NAMES:
                 if body.startswith(f"{arm}."):
                     self._arm_geoms[arm].add(i)
-                    if gname.startswith(f"{arm}.fixed_jaw") or gname.startswith(f"{arm}.moving_jaw"):
-                        self._jaw_geoms[arm].add(i)
+        # Jaw geoms are classified by BODY, not name: the official model's
+        # jaw collision meshes are unnamed, and a name-prefix match would
+        # leave them out — their contact force on a clamped object would
+        # then read as external support and fail the pick verify (measured:
+        # 0.13 N from the mesh at the 2.94 N m clamp).
+        for arm in ARM_NAMES:
+            jaw_bodies: set[int] = set()
+            for i in range(m.ngeom):
+                gname = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, i) or ""
+                if gname.startswith(f"{arm}.fixed_jaw") or gname.startswith(
+                    f"{arm}.moving_jaw"
+                ):
+                    jaw_bodies.add(int(m.geom_bodyid[i]))
+            for i in range(m.ngeom):
+                if int(m.geom_bodyid[i]) in jaw_bodies:
+                    self._jaw_geoms[arm].add(i)
         drawer_jnt = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, "drawer_slide")
         self._drawer_qadr = int(m.jnt_qposadr[drawer_jnt])
         self._drawer_act = next(
@@ -113,6 +128,12 @@ class TeacherContext:
         mat = np.zeros(9, dtype=np.float64)
         mujoco.mju_quat2Mat(mat, np.asarray(quat, dtype=np.float64))
         return float(mat.reshape(3, 3)[2, 2])
+
+    def object_speed(self, name: str) -> float:
+        """Linear speed (m/s) of a free-floating object's body origin."""
+        bid = self.object_body(name)
+        adr = int(self.model.jnt_dofadr[int(self.model.body_jntadr[bid])])
+        return float(np.linalg.norm(self.data.qvel[adr:adr + 3]))
 
     def drawer_opening(self) -> float:
         return float(self.data.qpos[self._drawer_qadr])
@@ -377,12 +398,19 @@ class TeacherContext:
         carried = self.carrying[arm]
         carry_ref = None
         if carried is not None:
-            jadr = int(self.model.jnt_qposadr[int(self.model.body_jntadr[self.object_body(carried)])])
-            site_pos, site_rot = site_pose(self.data, f"{arm}.ee")
-            obj_pos, obj_quat = self.object(carried)
-            obj_mat = np.zeros(9, dtype=np.float64)
-            mujoco.mju_quat2Mat(obj_mat, np.asarray(obj_quat, dtype=np.float64))
-            carry_ref = (site_rot.T @ (obj_pos - site_pos), site_rot.T @ obj_mat.reshape(3, 3), jadr)
+            jid = int(self.model.body_jntadr[self.object_body(carried)])
+            # Teleport only free-floating bodies (a 7-qpos pos+quat block). A
+            # carried slide-joint body (the drawer during a physical pull) is
+            # advanced by drawer_follow instead: writing the 7-qpos block at
+            # its 1-DOF address would corrupt the joints that follow it in
+            # the qpos vector (arm A's pose) and audit a garbage configuration.
+            if int(self.model.jnt_type[jid]) == int(mujoco.mjtJoint.mjJNT_FREE):
+                jadr = int(self.model.jnt_qposadr[jid])
+                site_pos, site_rot = site_pose(self.data, f"{arm}.ee")
+                obj_pos, obj_quat = self.object(carried)
+                obj_mat = np.zeros(9, dtype=np.float64)
+                mujoco.mju_quat2Mat(obj_mat, np.asarray(obj_quat, dtype=np.float64))
+                carry_ref = (site_rot.T @ (obj_pos - site_pos), site_rot.T @ obj_mat.reshape(3, 3), jadr)
         for wi, q in enumerate(points):
             if drawer_follow:
                 frac = wi / max(len(points) - 1, 1)
@@ -440,6 +468,37 @@ class TeacherContext:
         finally:
             self._grip_close[arm] = None
 
+    @contextmanager
+    def grip_saturation(self, arm: str, torque_limit: float, aperture: float = 0.0):
+        """Keep the torque-saturated close active across other motions.
+
+        ``close_gripper`` clears the saturation when its generator exits, after
+        which a plain position servo at the resting aperture exerts no
+        steady-state squeeze — a dragged grasp (the drawer pull) then slips.
+        Wrapping the motion keeps the servo pressing at ``torque_limit``.
+        """
+        self._grip_close[arm] = (
+            float(torque_limit),
+            float(self.scene._aperture_to_ctrl(arm, aperture)),
+        )
+        try:
+            yield
+        finally:
+            self._grip_close[arm] = None
+
+    def hold(self, arm: str, q_target: np.ndarray, seconds: float):
+        """Hold a commanded joint target while the position servo converges.
+
+        The quintic playback ends when the clock reaches the duration, but the
+        arm is still several mm short of the final waypoint; measurements and
+        phase checks that read the lagged pose fail spuriously (the deep
+        drawer columns' lift).
+        """
+        q = np.asarray(q_target, dtype=np.float64)
+        end = float(self.data.time) + seconds
+        while float(self.data.time) < end:
+            yield self.action(arm, q, self._grip_now[arm])
+
     def open_gripper(self, arm: str, aperture: float = 0.30, seconds: float = 0.8):
         q = arm_q(self.data, arm)
         grip0 = self._grip_now[arm]
@@ -448,3 +507,31 @@ class TeacherContext:
     def hold_drawer_neutral(self) -> None:
         """Zero the drawer servo error so a physical pull is not fought."""
         self.data.ctrl[self._drawer_act] = float(self.data.qpos[self._drawer_qadr])
+
+    def hold_drawer_open(self) -> None:
+        """Hand the drawer back to its servo holding the CURRENT opening.
+
+        While neutral (zero servo error) the drawer is effectively free, and
+        the withdrawing arm's incidental drag slides it shut — the follow-up
+        CloseDrawer then reports ``already_closed`` (measured). The kp=200
+        servo at a fixed target holds it against grazes.
+        """
+        self.drawer_neutral = False
+        self.data.ctrl[self._drawer_act] = float(self.data.qpos[self._drawer_qadr])
+
+    def servo_close_drawer(self, arm: str = "A", seconds: float = 3.0,
+                           target_opening: float = 0.0):
+        """Slide the drawer toward ``target_opening`` via its position servo
+        while an arm holds a retrieved utensil (the physical CloseDrawer
+        needs the gripper), or to bring a fully-open drawer's handle back
+        into the arm's grasp band.
+
+        The held arm keeps its current target; the saturation in effect
+        around this call keeps the grasp alive.
+        """
+        start = float(self.data.qpos[self._drawer_qadr])
+        t0 = float(self.data.time)
+        while float(self.data.time) < t0 + seconds:
+            frac = _smooth((float(self.data.time) - t0) / seconds)
+            self.data.ctrl[self._drawer_act] = start + (target_opening - start) * frac
+            yield self.action(arm, arm_q(self.data, arm), self._grip_now[arm])

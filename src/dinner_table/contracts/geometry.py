@@ -19,6 +19,8 @@ TABLE_SIZE = (0.96, 0.78)
 CABINET_X = -0.24  # tabletop cutlery caddy; drawer slides open toward the arms (-Y)
 CABINET_Y = 0.11
 DRAWER_TRAVEL = 0.12
+# Horizontal handle bar's center (site drawer_handle in the drawer frame).
+DRAWER_HANDLE = (CABINET_X, CABINET_Y - 0.16, TABLE_TOP_HEIGHT + 0.052)
 
 ARM_MOUNTS = {
     "A": (-0.20, -0.305, TABLE_TOP_HEIGHT + 0.018),
@@ -61,8 +63,15 @@ ARM_B_ZONE = (-0.02, 0.48, -0.39, 0.05)
 PLACEMATS = {
     "placemat_1": (-0.06, -0.095, TABLE_TOP_HEIGHT),  # plate setting (arm A side)
     "placemat_2": (0.265, -0.065, TABLE_TOP_HEIGHT),  # mug setting (arm B side)
+    # Cutlery settings beside the plate (the reference uses separate
+    # fork/spoon targets): the fork west of the plate setting, the spoon
+    # south of the shared zone — both inside arm A's verified top-down
+    # envelope (x <= 0 measured) and clear of the plate's 9 cm footprint.
+    # Reachable once the drawer has been servo-closed after retrieval — the
+    # OPEN drawer's front wall crosses the western band.
+    "fork_setting": (-0.18, -0.095, TABLE_TOP_HEIGHT),
+    "spoon_setting": (0.0, -0.18, TABLE_TOP_HEIGHT),
 }
-DRAWER_HANDLE = (CABINET_X, CABINET_Y - 0.18, TABLE_TOP_HEIGHT + 0.0575)
 HOME_JOINTS = {
     "A": (0.0, -0.70, 0.80, 0.20, 0.0, 0.43),
     "B": (0.0, -0.70, 0.80, 0.20, 0.0, 0.43),

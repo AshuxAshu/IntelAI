@@ -13,8 +13,13 @@ from dinner_table.contracts.geometry import CABINET_X, CABINET_Y, TABLE_TOP_HEIG
 
 logger = logging.getLogger(__name__)
 
-DRAWER_TRAY_Z = 0.385  # drawer floor top (TABLE_TOP_HEIGHT + 0.019) + box half-height
+DRAWER_TRAY_Z = 0.389  # cutlery rail tops (TABLE_TOP_HEIGHT + 0.029); utensil origins sit at their base
 UTENSIL_XY_JITTER_M = 0.01
+UTENSIL_Y_JITTER_M = 0.003  # rails are 6 mm wide in y (reference: +/-3 mm)
+# Cutlery lies in the tray at near-zero yaw (the reference's +/-4 deg): a
+# strongly yawed box can only be pinched at a corner — a knife-edge grip
+# that sags and slips under carry (measured).
+UTENSIL_YAW_JITTER_RAD = 0.07
 # The bottle's neck grasp sits high in the arm's constrained envelope: the
 # verified-feasible region around its anchor is razor-thin, so its spawn
 # jitter is minimal (mass/friction DR still fully randomize).
@@ -92,7 +97,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
     # the drawer has slid open.
     "spoon_1": ObjectSpec(
         physics=("box", (0.009, 0.055, 0.006)),
-        spawn_anchor=(-0.20, CABINET_Y, DRAWER_TRAY_Z),
+        spawn_anchor=(-0.15, CABINET_Y - 0.015, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.014,
         friction=(0.5, 0.005, 0.0001),
@@ -101,7 +106,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
     ),
     "spoon_2": ObjectSpec(
         physics=("box", (0.009, 0.055, 0.006)),
-        spawn_anchor=(-0.165, CABINET_Y, DRAWER_TRAY_Z),
+        spawn_anchor=(-0.115, CABINET_Y - 0.015, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.014,
         friction=(0.5, 0.005, 0.0001),
@@ -110,7 +115,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
     ),
     "fork_1": ObjectSpec(
         physics=("box", (0.007, 0.055, 0.006)),
-        spawn_anchor=(-0.28, CABINET_Y, DRAWER_TRAY_Z),
+        spawn_anchor=(-0.22, CABINET_Y - 0.015, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.012,
         friction=(0.5, 0.005, 0.0001),
@@ -119,7 +124,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
     ),
     "fork_2": ObjectSpec(
         physics=("box", (0.007, 0.055, 0.006)),
-        spawn_anchor=(-0.24, CABINET_Y, DRAWER_TRAY_Z),
+        spawn_anchor=(-0.185, CABINET_Y - 0.015, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.012,
         friction=(0.5, 0.005, 0.0001),
@@ -175,17 +180,27 @@ def sample_spawns(
             else:
                 if name.startswith("spoon") or name.startswith("fork"):
                     jitter_limit = UTENSIL_XY_JITTER_M
+                    # The cutlery rails are 6 mm wide in y: a large y jitter
+                    # lands the handle between them and the utensil rests on
+                    # the drawer floor instead (the reference jitters cutlery
+                    # y by only +/-3 mm; x and yaw still randomize fully).
+                    jitter_y_limit = UTENSIL_Y_JITTER_M
+                    yaw_limit = UTENSIL_YAW_JITTER_RAD
                 elif name == "bottle":
                     # The neck grasp sits high in the arm's constrained
                     # envelope; the verified-feasible region around the anchor
                     # is tight, so the bottle's spawn jitter is halved (mass
                     # and friction DR still fully randomize).
                     jitter_limit = min(BOTTLE_XY_JITTER_M, dr.spawn_xy_jitter_m)
+                    jitter_y_limit = jitter_limit
+                    yaw_limit = dr.spawn_yaw_jitter_rad
                 else:
                     jitter_limit = dr.spawn_xy_jitter_m
+                    jitter_y_limit = dr.spawn_xy_jitter_m
+                    yaw_limit = dr.spawn_yaw_jitter_rad
                 jitter_x = rng.uniform(-jitter_limit, jitter_limit)
-                jitter_y = rng.uniform(-jitter_limit, jitter_limit)
-                yaw_jitter = rng.uniform(-dr.spawn_yaw_jitter_rad, dr.spawn_yaw_jitter_rad)
+                jitter_y = rng.uniform(-jitter_y_limit, jitter_y_limit)
+                yaw_jitter = rng.uniform(-yaw_limit, yaw_limit)
                 pos = np.array(
                     [
                         spec.spawn_anchor[0] + jitter_x,
@@ -247,7 +262,24 @@ def _count_geoms(name: str) -> int:
         return 1 + 24 + 24 + 3
     if name == "bottle":
         return 1 + 24 + 24 + 24
+    if name.startswith("fork"):
+        return 1 + 1 + 1 + 4
+    if name.startswith("spoon"):
+        return 1 + 1 + 1
     return 1
+
+
+def _box(body, name: str, half_x: float, half_y: float, half_z: float,
+         pos, mass: float, friction) -> None:
+    body.add_geom(
+        type=mujoco.mjtGeom.mjGEOM_BOX,
+        size=np.array([half_x, half_y, half_z], dtype=np.float64),
+        pos=np.asarray(pos, dtype=np.float64),
+        mass=mass,
+        friction=friction,
+        solref=SOFT_SOLREF,
+        condim=4,
+    )
 
 
 def _ring(body, name: str, radius: float, thickness: float, height: float,
@@ -308,14 +340,25 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         _ring(body, name, PLATE_RIM_R, 0.010, 0.020, 0.014, per, friction)
     elif name == "mug":
         # Reference mug dimensions (their grasp offsets are measured against
-        # this exact wall radius and height; Amendment 1 port).
-        _cyl(body, name, 0.025, 0.007, 0.007, per, friction)
-        _ring(body, name, 0.025, 0.004, 0.064, 0.046, per, friction)
-        _ring(body, name, 0.025, 0.0045, 0.003, 0.0645, per, friction)
-        _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.019], per, friction)
-        _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.055], per, friction)
-        _capsule(body, name, 0.004, 0.018, [0.047, 0.0, 0.037], per, friction,
+        # this exact wall radius and height; Amendment 1 port). Massless
+        # geoms + one centered inertial (the reference's approach): with
+        # per-geom masses the handle capsules offset the COM and the mug
+        # pivots toward the handle, creeping ~15 cm/min on the soft contacts
+        # (measured) — which trips the placement verify's bystander check.
+        _cyl(body, name, 0.025, 0.007, 0.007, 0.0, friction)
+        _ring(body, name, 0.025, 0.004, 0.064, 0.046, 0.0, friction)
+        _ring(body, name, 0.025, 0.0045, 0.003, 0.0645, 0.0, friction)
+        _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.019], 0.0, friction)
+        _capsule(body, name, 0.004, 0.012, [0.035, 0.0, 0.055], 0.0, friction)
+        _capsule(body, name, 0.004, 0.018, [0.047, 0.0, 0.037], 0.0, friction,
                  quat=np.array([0.7071068, 0.0, 0.7071068, 0.0], dtype=np.float64))
+        body.explicitinertial = True
+        body.mass = mass_kg
+        body.ipos = [0.0, 0.0, 0.032]
+        # Reference box inertia over their mug size (.077, .050, .064).
+        body.inertia = (mass_kg / 12.0 * np.array(
+            [0.050**2 + 0.064**2, 0.077**2 + 0.064**2, 0.077**2 + 0.050**2]
+        )).tolist()
     elif name == "bottle":
         # 10 cm hollow bottle: base, body wall, shoulder step, narrow neck.
         # The four working grasp recipes (plate/mug/utensils) are unaffected
@@ -324,6 +367,46 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         _ring(body, name, BOTTLE_WALL_R, 0.004, 0.041, 0.0275, per, friction)
         _ring(body, name, 0.024, 0.008, 0.010, 0.053, per, friction)
         _ring(body, name, 0.013, 0.003, 0.030, 0.073, per, friction)
+
+
+def _build_utensil(body, name: str, mass_kg: float, friction) -> None:
+    """Cutlery as a handle-neck-head composite with reference dimensions.
+
+    A uniform stick gives the jaw tips only +/-6 mm of side face before the
+    box pitches off the point contacts mid-carry — regardless of grip force
+    (measured at 0.5 and 2.94 N m). The composite's handle is taller (16 mm)
+    and massless geoms plus one centered inertial (the reference's approach)
+    keep the COM at the object's middle: a per-geom mass distribution puts
+    4/7 of a fork's mass in its tines, and the front-heavy pendulum droops
+    its head onto the drawer floor when pinched at the handle (measured:
+    29 deg droop). Origins sit at the base, like the vessels.
+    """
+    is_fork = name.startswith("fork")
+    width = 0.017 if is_fork else 0.022
+    length, height = 0.110, 0.016
+    _box(body, name, 0.0045, 0.034, 0.008, [0.0, -0.019, 0.008], 0.0, friction)
+    _box(body, name, 0.003, 0.010, 0.004, [0.0, 0.020, 0.004], 0.0, friction)
+    if is_fork:
+        _box(body, name, 0.0085, 0.007, 0.004, [0.0, 0.032, 0.004], 0.0, friction)
+        for i in range(4):
+            _box(body, name, 0.00125, 0.011, 0.0015,
+                 [(i - 1.5) * 0.0048, 0.046, 0.004], 0.0, friction)
+    else:
+        body.add_geom(
+            type=mujoco.mjtGeom.mjGEOM_ELLIPSOID,
+            size=np.array([0.011, 0.019, 0.003], dtype=np.float64),
+            pos=np.array([0.0, 0.038, 0.004], dtype=np.float64),
+            mass=0.0,
+            friction=friction,
+            solref=SOFT_SOLREF,
+            condim=4,
+        )
+    body.explicitinertial = True
+    body.mass = mass_kg
+    body.ipos = [0.0, 0.0, height / 2.0]
+    body.inertia = (mass_kg / 12.0 * np.array(
+        [length**2 + height**2, width**2 + height**2, width**2 + length**2]
+    )).tolist()
 
 
 def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarray]) -> None:
@@ -337,6 +420,9 @@ def instantiate(spec: mujoco.MjSpec, name: str, pose: tuple[np.ndarray, np.ndarr
         body.add_freejoint()
     if name in ("plate", "mug", "bottle"):
         _build_vessel(body, name, obj_spec.mass_kg, obj_spec.friction)
+        return
+    if name.startswith(("fork", "spoon")):
+        _build_utensil(body, name, obj_spec.mass_kg, obj_spec.friction)
         return
     geom_type_str, geom_size = obj_spec.physics
     geom_type_map = {
