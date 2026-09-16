@@ -10,6 +10,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+# The Intel stack has no macOS wheels (see pyproject's sys_platform markers), so
+# the module-level imports below abort COLLECTION of the whole suite on a dev Mac
+# rather than being skipped by the pytestmark further down. Skip at import time
+# instead; on the Intel target host the stack is present and nothing is skipped.
+pytest.importorskip("openvino", reason="Intel stack (openvino) not installed on this host")
+pytest.importorskip("physicalai", reason="Intel stack (physicalai) not installed on this host")
+
 from openvino import Core as OvCore
 from physicalai.inference import InferenceModel
 from physicalai.inference.component_factory import component_registry

@@ -37,7 +37,11 @@ class LivePublisher:
             self._mm = np.memmap(LIVE_DIR / "state.bin", dtype=np.float64,
                                  mode="w+", shape=(BUFFER_FLOATS,))
             self._publish_meta()
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError: two processes sharing LIVE_DIR can map the file
+            # between another's create and resize ("mmap length is greater
+            # than file size"). Publishing is a debug convenience, so a lost
+            # race silently disables it rather than killing the episode.
             self.active = False
 
     def _publish_meta(self) -> None:

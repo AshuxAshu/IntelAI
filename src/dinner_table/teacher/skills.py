@@ -41,11 +41,28 @@ LIFT_MIN = {
     "fork_1": 0.012, "fork_2": 0.012, "spoon_1": 0.012, "spoon_2": 0.012,
 }
 DEFAULT_LIFT_MIN = 0.02
-# Base radii for the flatten-shift correction: a hollow vessel delivered
-# tilted (the side-wall pinch hangs it a few degrees off vertical — the
-# grasp-point lever is inherent) lands on its rim edge and flattens on
-# release, shifting its base center by radius*sin(tilt) along the lean.
-BASE_RADIUS = {"plate": 0.09, "mug": 0.04, "bottle": 0.03}
+# Closed-loop seating: a carried vessel hangs off its grasp point and rocks
+# flat against the table as it touches down, so where it lands cannot be
+# predicted from the hanging pose. The descend measures the residual and
+# re-seats on it instead (see Place.run).
+PLACE_RESEAT_TOL_M = 0.003   # residual at which re-seating stops paying
+PLACE_RESEAT_ATTEMPTS = 2    # bounded: the residual collapses in one or two
+PLACE_RESEAT_LIFT_M = 0.005  # just enough to unload; a big lift lets it re-tilt
+# A tall vessel set down on its base rim rocks for seconds before it is still,
+# and a placement judged mid-rock reads high with the lean to match (measured
+# on the bottle: 11 mm off and 0.92 upright at 1 s, 0.4 mm and 1.00 at 6 s).
+# Verification therefore waits for the plan's stillness threshold first.
+PLACE_STILL_SPEED = 0.003  # m/s
+PLACE_SETTLE_MAX_S = 8.0
+PLACE_RELEASED_FORCE_MAX = 0.01  # N per jaw once the object is truly let go
+# Opening the jaws retracts only the MOVING one; the fixed jaw stays where it
+# was, a hair outboard of what was gripped. Re-solving IK for the retreat
+# rotates the wrist a fraction of a degree, which is enough to swing the fixed
+# jaw's tip sphere back into a just-released object and lever it over
+# (measured on the relayed bottle: 0.47 N at the tip, then a topple). Backing
+# the tool point off along its own +X — the direction the fixed jaw sits in —
+# clears the jaw before any lift.
+RELEASE_BACKOFF_M = 0.010
 # The reference teacher's carried-object graze tolerance.
 EXTERNAL_FORCE_MAX = 0.10
 # The plate's rim tube is smooth: a 0.7 N m saturated press lets the
@@ -141,21 +158,9 @@ class Pick(Skill):
         for attempt in (1, 2):
             frame = self.catalog.frame(ctx.scene, self.object_name, self.arm)
             try:
-                q_grasp = ctx.plan_ik(self.arm, frame.position, frame.approach,
-                                      frame.lateral, seed=self._home_seed(frame))
-                hover_pos = frame.position + np.array([0.0, 0.0, frame.hover_m])
-                q_hover = None
-                for hover in (frame.hover_m, frame.hover_m - 0.010, max(frame.hover_m - 0.020, 0.010)):
-                    try:
-                        q_hover = ctx.plan_ik(
-                            self.arm, frame.position + np.array([0.0, 0.0, hover]),
-                            frame.approach, frame.lateral, seed=q_grasp,
-                        )
-                        break
-                    except IKUnreachable:
-                        q_hover = None
-                if q_hover is None:
-                    raise IKUnreachable(f"{self.arm}.ee", hover_pos)
+                q_grasp, q_hover = plan_grasp_and_hover(
+                    ctx, self.arm, frame, seed=self._home_seed(frame),
+                )
             except IKUnreachable as exc:
                 if attempt == 2:
                     raise SkillFailed("pick", "pregrasp", "ik_unreachable") from exc
@@ -297,7 +302,8 @@ class Pick(Skill):
                 yield from ctx.open_gripper(self.arm, frame.aperture, 1.5)
                 continue
             raise SkillFailed("pick", "close", "missed_grasp")
-        ctx.carrying[self.arm] = self.object_name
+        ctx.begin_carry(self.arm, self.object_name,
+                        CARRY_GRIP_TORQUE.get(self.object_name, frame.grip_torque))
         self._set_phase("lift")
         # Keep the saturated close pressing through the lift: once the close
         # generator exits, a plain servo at the resting aperture exerts no
@@ -371,6 +377,62 @@ class Pick(Skill):
             raise SkillFailed("pick", "verify", "missed_grasp")
 
 
+def plan_grasp_and_hover(ctx: TeacherContext, arm: str, frame: GraspFrame,
+                        seed: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Solve the grasp pose and a hover above it, or raise ``IKUnreachable``.
+
+    This is the exact feasibility test ``Pick`` applies before it commits to an
+    approach, exposed so a planner can ask "could this arm pick the object up
+    from there?" and get the same answer the skill will (see
+    ``bimanual.relay_anchor``, which must not park an object outside the
+    receiving arm's envelope).
+    """
+    if seed is None:
+        seed = np.array(HOME_JOINTS[arm][:5], dtype=np.float64)
+        if frame.wrist_roll_seed is not None:
+            seed[4] = frame.wrist_roll_seed
+    q_grasp = ctx.plan_ik(arm, frame.position, frame.approach, frame.lateral, seed=seed)
+    hover_pos = frame.position + np.array([0.0, 0.0, frame.hover_m])
+    for hover in (frame.hover_m, frame.hover_m - 0.010, max(frame.hover_m - 0.020, 0.010)):
+        try:
+            q_hover = ctx.plan_ik(
+                arm, frame.position + np.array([0.0, 0.0, hover]),
+                frame.approach, frame.lateral, seed=q_grasp,
+            )
+        except IKUnreachable:
+            continue
+        return q_grasp, q_hover
+    raise IKUnreachable(f"{arm}.ee", hover_pos)
+
+
+def _joint_segment(q_from: np.ndarray, q_to: np.ndarray) -> np.ndarray:
+    """Joint-space waypoints from one arm pose to another, ~0.035 rad apart."""
+    q_from = np.asarray(q_from, dtype=np.float64)
+    q_to = np.asarray(q_to, dtype=np.float64)
+    n = max(8, int(np.max(np.abs(q_to - q_from)) / 0.035) + 2)
+    return np.linspace(q_from, q_to, n)
+
+
+def _flatten_rotation(obj_quat: np.ndarray) -> np.ndarray:
+    """Rotation (3,3) taking an object's current attitude to its flat one.
+
+    A carried vessel hangs off its grasp point by a few degrees and rocks flat
+    as the table takes its weight. While it rocks, the clamped grasp point is
+    the pivot, so the object's own origin swings by exactly this rotation
+    applied to the origin-to-grasp-point vector — which is what lets the
+    descend aim the tool point at where the object will END UP rather than
+    where it currently hangs. The flat attitude is the current one with the
+    lean taken out: same yaw, no tilt.
+    """
+    mat = np.zeros(9, dtype=np.float64)
+    mujoco.mju_quat2Mat(mat, np.asarray(obj_quat, dtype=np.float64))
+    rot = mat.reshape(3, 3)
+    yaw = float(np.arctan2(rot[1, 0], rot[0, 0]))
+    cos, sin = np.cos(yaw), np.sin(yaw)
+    flat = np.array([[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]])
+    return flat @ rot.T
+
+
 class Place(Skill):
     """Carry to a target anchor, descend to measured support, release, verify."""
 
@@ -401,25 +463,6 @@ class Place(Skill):
         except (ValueError, KeyError) as exc:
             raise SkillFailed("place", "carry", f"unknown target {self.target}") from exc
         return np.array([goal[0], goal[1], PLACE_Z["table"]])
-
-    def _flatten_shift(self, obj_quat: np.ndarray) -> np.ndarray:
-        """Predicted horizontal shift when a leaning vessel rocks flat.
-
-        A tilted cylinder lands on its rim edge; flattening rotates the base
-        center toward the lean by radius*sin(tilt). Zero for objects without
-        a cataloged base radius (cutlery rolls negligibly).
-        """
-        radius = BASE_RADIUS.get(self.object_name)
-        if radius is None:
-            return np.zeros(3)
-        mat = np.zeros(9, dtype=np.float64)
-        mujoco.mju_quat2Mat(mat, np.asarray(obj_quat, dtype=np.float64))
-        lean = np.array(mat.reshape(3, 3)[:2, 2], dtype=np.float64)  # up-axis xy
-        norm = float(np.linalg.norm(lean))
-        if norm < 1e-6:
-            return np.zeros(3)
-        tilt = float(np.arctan2(norm, abs(float(mat.reshape(3, 3)[2, 2]))))
-        return radius * np.sin(tilt) * np.array([lean[0], lean[1], 0.0]) / norm
 
     def run(self, ctx: TeacherContext) -> Iterator[np.ndarray]:
         if ctx.carrying.get(self.arm) != self.object_name:
@@ -524,59 +567,114 @@ class Place(Skill):
                 s_pos, _ = site_pose(ctx.data, f"{self.arm}.ee")
                 o_pos, _ = ctx.object(self.object_name)
                 samples.append(s_pos - o_pos)
-            # A leaning vessel is delivered short of the target by its
-            # predicted flatten shift so it settles ON the target when the
-            # release lets it rock flat. The last 2 mm is a deliberate
-            # press: an object delivered exactly to its rest height only
-            # grazes the surface with ~0 N support while the grip still
-            # carries its weight (measured on the fork). The offset is the
-            # MEDIAN across the swing — a mean is inflated by the pendulum
-            # extremes (measured: a swinging spoon produced an 8 cm offset
-            # and an unreachable descent target).
-            obj_quat = ctx.object(self.object_name)[1]
-            ee_end = (target + np.median(samples, axis=0)
-                      - self._flatten_shift(obj_quat)
-                      - np.array([0.0, 0.0, 0.002]))
-            try:
-                pts = ctx.plan_cartesian(self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0],
-                                         ee_end, frame.approach, frame.lateral)
-            except IKUnreachable as exc:
-                raise SkillFailed("place", "hover", "ik_unreachable") from exc
-            ctx.check_path(self.arm, pts)
-            self._set_phase("descend")
+            # Deliver the GRASP POINT so the object lands on the target: the
+            # last 2 mm is a deliberate press, since an object delivered
+            # exactly to its rest height only grazes the surface with ~0 N
+            # support while the grip still carries its weight (measured on
+            # the fork). The offset is the MEDIAN across the swing — a mean
+            # is inflated by the pendulum extremes (measured: a swinging
+            # spoon produced an 8 cm offset and an unreachable descent
+            # target).
+            #
+            # A carried vessel hangs off the grasp point by several degrees
+            # (the lever is inherent to a rim or wall pinch), so the hanging
+            # offset sampled here is NOT the offset the object settles at:
+            # it rocks flat against the table DURING the descend, while
+            # still gripped, which swings its base center by up to 4 cm.
+            # Predicting that swing open-loop is what the earlier
+            # flatten-shift correction tried; measured against the physics
+            # it over-corrected by its own magnitude (predicted 22-41 mm of
+            # post-release settle where the real settle is under 1 mm — the
+            # object is already flat by the time it carries load). The
+            # descend is therefore closed-loop instead: seat, measure where
+            # the object actually landed, and re-seat on the residual.
+            hang_offset = np.median(samples, axis=0)
+            settled_offset = _flatten_rotation(ctx.object(self.object_name)[1]) @ hang_offset
+            # Horizontal from the settled (post-rock) offset, vertical from
+            # the hanging one less a 2 mm press: the descend stops on measured
+            # support, so an over-deep z target only means the last
+            # millimetre is a press rather than a graze.
+            ee_end = np.array([
+                target[0] + settled_offset[0],
+                target[1] + settled_offset[1],
+                target[2] + hang_offset[2] - 0.002,
+            ])
             grip = ctx._grip_now[self.arm]
-            motion = ctx.play(self.arm, pts, grip, grip, 4.0)
 
             def seated() -> bool:
                 # Near-flat on the surface with real support: a first
                 # rim-edge touch leaves hollow vessels tilted a few degrees
-                # and a couple mm high — the flatten happens on release
-                # (predicted and pre-compensated above).
+                # and a couple mm high, and they rock flat as the descend
+                # keeps pressing.
                 pos, _ = ctx.object(self.object_name)
                 return (ctx.object_support_force(self.object_name) > 0.06
                         and abs(float(pos[2]) - target[2]) < 0.003)
 
             supported = False
-            for action in motion:
-                ctx.step(action)
-                if seated():
-                    supported = True
-                    break
-            if not supported:
-                # The playback clock ends with the servo short of the last
-                # waypoint; hold the drop target until the object seats (or
-                # genuinely never touches).
-                hold_end = float(ctx.data.time) + 1.5
-                while float(ctx.data.time) < hold_end:
-                    yield ctx.action(self.arm, pts[-1], grip)
-                    if seated():
+            # One delivery plus bounded re-seats. Each pass lifts the (still
+            # gripped) object clear, shifts the tool point by the measured
+            # residual, and sets it down again; because the object is flat
+            # from the first touchdown on, the offset is stable and the
+            # residual collapses in one or two passes. The whole block runs
+            # inside the seating window: between touchdown and release the
+            # object's weight is on the table, so the jaws read slack and the
+            # carry audit would otherwise call a correct placement a fumble.
+            with ctx.seating(self.arm):
+                for attempt in range(PLACE_RESEAT_ATTEMPTS + 1):
+                    try:
+                        pts = ctx.plan_cartesian(
+                            self.arm, site_pose(ctx.data, f"{self.arm}.ee")[0],
+                            ee_end, frame.approach, frame.lateral,
+                        )
+                    except IKUnreachable as exc:
+                        if attempt == 0:
+                            raise SkillFailed("place", "hover", "ik_unreachable") from exc
+                        break  # keep the seating already achieved
+                    ctx.check_path(self.arm, pts)
+                    self._set_phase("descend")
+                    supported = False
+                    for action in ctx.play(self.arm, pts, grip, grip, 4.0):
+                        # Yield rather than step directly: the driver owns the
+                        # physics tick, and a self-stepped action never reaches
+                        # the episode log the data engine replays from.
+                        yield action
+                        if seated():
+                            supported = True
+                            break
+                    if not supported:
+                        # The playback clock ends with the servo short of the
+                        # last waypoint; hold the drop target until the object
+                        # seats (or genuinely never touches).
+                        hold_end = float(ctx.data.time) + 1.5
+                        while float(ctx.data.time) < hold_end:
+                            yield ctx.action(self.arm, pts[-1], grip)
+                            if seated():
+                                supported = True
+                                break
+                    if not supported:
+                        if not seated():
+                            raise SkillFailed("place", "descend", "no_support")
                         supported = True
+                    pos, _ = ctx.object(self.object_name)
+                    residual = target[:2] - pos[:2]
+                    if float(np.linalg.norm(residual)) <= PLACE_RESEAT_TOL_M:
                         break
-            if not supported:
-                pos, _ = ctx.object(self.object_name)
-                if not (ctx.object_support_force(self.object_name) > 0.06
-                        and abs(float(pos[2]) - target[2]) < 0.003):
-                    raise SkillFailed("place", "descend", "no_support")
+                    if attempt == PLACE_RESEAT_ATTEMPTS:
+                        break
+                    # Lift clear, then aim the tool point at the residual-shifted
+                    # drop: the object is flat now, so site-minus-object is the
+                    # offset it will keep.
+                    site_now, _ = site_pose(ctx.data, f"{self.arm}.ee")
+                    ee_end = np.array([
+                        site_now[0] + residual[0], site_now[1] + residual[1], ee_end[2],
+                    ])
+                    try:
+                        yield from ctx.play_cartesian(
+                            self.arm, site_now + np.array([0.0, 0.0, PLACE_RESEAT_LIFT_M]),
+                            frame.approach, frame.lateral, 1.2,
+                        )
+                    except (IKUnreachable, SkillFailed):
+                        break  # cannot lift to re-seat: keep what we have
         self._set_phase("release")
         # End the carry BEFORE opening: the grasp audit must not read the
         # intentional release as a fumbled grasp, and the exit's scratch
@@ -584,8 +682,17 @@ class Place(Skill):
         # slowly (the reference's 3 s release): a fast open throws the
         # just-supported object ~6 mm as the pinch preload relaxes
         # (measured on the mug).
-        ctx.carrying[self.arm] = None
+        ctx.end_carry(self.arm)
         yield from ctx.open_gripper(self.arm, 0.30, 3.0)
+        # Slide the fixed jaw off the object before lifting at all.
+        site_now, rot_now = site_pose(ctx.data, f"{self.arm}.ee")
+        try:
+            yield from ctx.play_cartesian(
+                self.arm, site_now + RELEASE_BACKOFF_M * rot_now[:, 0],
+                frame.approach, frame.lateral, 1.0,
+            )
+        except (IKUnreachable, SkillFailed):
+            pass  # no room to back off: the plain rise below is the fallback
         # Rise well clear of the placed object before the home sweep: the
         # joint arc dips a few mm early on and the jaw tips catch the rim of
         # a just-placed mug (measured: hooked at site z 0.444 vs rim 0.435).
@@ -599,29 +706,66 @@ class Place(Skill):
                 break
             except (IKUnreachable, SkillFailed):
                 continue
+        # The object is furniture again: `Pick` whitelisted it so the approach
+        # could work at contact distance, and leaving it whitelisted would let
+        # the home sweep knock a placed object over unnoticed.
+        ctx.allowed[self.arm].discard(self.object_name)
         # Home along a checked path; if the arc would clip the placed object
         # (or anything else), retreat toward the table edge and re-plan.
         q_home = np.array(HOME_JOINTS[self.arm][:5])
 
         def home_points() -> np.ndarray:
-            q_start = arm_q(ctx.data, self.arm)
-            n = max(8, int(np.max(np.abs(q_home - q_start)) / 0.035) + 2)
-            return np.linspace(q_start, q_home, n)
+            return _joint_segment(arm_q(ctx.data, self.arm), q_home)
 
+        grip_now = ctx._grip_now[self.arm]
         try:
             home_pts = home_points()
             ctx.check_path(self.arm, home_pts)
         except SkillFailed:
-            back = site_pose(ctx.data, f"{self.arm}.ee")[0] + np.array([0.0, -0.10, 0.0])
-            yield from ctx.play_cartesian(self.arm, back, frame.approach,
-                                          frame.lateral, 2.5)
-            home_pts = home_points()
-            ctx.check_path(self.arm, home_pts)
-        grip_now = ctx._grip_now[self.arm]
-        yield from ctx.play(self.arm, home_pts, grip_now, grip_now, 3.0)
+            home_pts = None
+        if home_pts is not None:
+            yield from ctx.play(self.arm, home_pts, grip_now, grip_now, 3.0)
+        else:
+            # The straight arc home clips the object just placed. This happens
+            # wherever the drop sits close in front of its own arm — a relay
+            # anchor in the shared lens is barely 17 cm from the mount — and
+            # there the arm is folded far enough in that EVERY Cartesian step
+            # away is IK-unreachable (measured: 8 directions, 0 solved). Retreat
+            # in joint space instead: unfold to the home shape with the pan held,
+            # which lifts the wrist straight up off the object, then swing the
+            # pan home. Panning away first is the fallback for a drop the
+            # unfold would sweep across.
+            q_now = arm_q(ctx.data, self.arm)
+            unfold = q_home.copy()
+            unfold[0] = q_now[0]
+            candidates = [unfold]
+            away = 1.0 if self.arm == "B" else -1.0
+            for pan in (0.35 * away, 0.6 * away, -0.35 * away):
+                pose = q_now.copy()
+                pose[0] = q_now[0] + pan
+                candidates.append(pose)
+            retreated = False
+            for q_mid in candidates:
+                leg1 = _joint_segment(q_now, q_mid)
+                leg2 = _joint_segment(q_mid, q_home)
+                try:
+                    ctx.check_path(self.arm, leg1)
+                    ctx.check_path(self.arm, leg2)
+                except SkillFailed:
+                    continue
+                yield from ctx.play(self.arm, leg1, grip_now, grip_now, 2.5)
+                yield from ctx.play(self.arm, leg2, grip_now, grip_now, 3.0)
+                retreated = True
+                break
+            if not retreated:
+                raise SkillFailed("place", "release", "path_blocked")
         self._set_phase("verify")
-        for _ in range(12):  # 0.5 s settle window
-            yield ctx.action(self.arm, arm_q(ctx.data, self.arm), ctx._grip_now[self.arm])
+        q_still = arm_q(ctx.data, self.arm)
+        settle_end = float(ctx.data.time) + PLACE_SETTLE_MAX_S
+        while float(ctx.data.time) < settle_end:
+            yield ctx.action(self.arm, q_still, ctx._grip_now[self.arm])
+            if ctx.object_speed(self.object_name) < PLACE_STILL_SPEED:
+                break
         pos, _ = ctx.object(self.object_name)
         xy_err = float(np.linalg.norm(pos[:2] - target[:2]))
         z_err = abs(float(pos[2]) - target[2])
@@ -630,6 +774,12 @@ class Place(Skill):
             (float(np.linalg.norm(np.array(ctx.object(n)[0]) - p)) for n, p in others.items()),
             default=0.0,
         )
+        if ctx.object_support_force(self.object_name) <= 0.06:
+            raise SkillFailed("place", "verify", "no_support")
+        if ctx.object_speed(self.object_name) >= PLACE_STILL_SPEED:
+            raise SkillFailed("place", "verify", "misplaced")
+        if max(ctx.finger_forces(self.arm, self.object_name)) > PLACE_RELEASED_FORCE_MAX:
+            raise SkillFailed("place", "verify", "misplaced")
         if xy_err > 0.006 or z_err > 0.003 or disturbed > 0.004:
             raise SkillFailed("place", "verify", "misplaced")
         if frame.check_upright and upright < 0.98:

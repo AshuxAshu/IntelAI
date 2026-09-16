@@ -82,7 +82,17 @@ class GraspCatalog:
     DRAWER_LATERAL = np.array([0.0, -1.0, 0.0], dtype=np.float64)
 
     def frame(self, scene, name: str, arm: str) -> GraspFrame:
-        """Return the grasp frame for `name` grasped by `arm`.
+        """Return the grasp frame for `name` grasped by `arm`, at its live pose."""
+        if name == "drawer_top":
+            return self._drawer_frame(scene)
+        pos, quat = scene.object_pose(name)
+        return self.frame_at(name, pos, quat, arm)
+
+    def frame_at(self, name: str, pos, quat, arm: str) -> GraspFrame:
+        """Grasp frame for `name` at an ARBITRARY pose, not necessarily its live one.
+
+        Planning a placement that the other arm must then pick up (the relay)
+        needs the grasp frame of a pose the object does not hold yet.
 
         ``lateral`` is the solver-bound site-X direction. NOTE: the site's X
         axis is the gripper X negated, and in our MuJoCo build the robust
@@ -90,11 +100,9 @@ class GraspCatalog:
         (their engine's own picks fail on this MuJoCo version — verified), so
         the frames below pin the basin that clamps correctly here.
         """
-        if name == "drawer_top":
-            return self._drawer_frame(scene)
         if name not in ("plate", "mug", "bottle", "spoon_1", "spoon_2", "fork_1", "fork_2"):
             raise GraspCatalogError(f"no grasp frame for object: {name}")
-        pos, quat = scene.object_pose(name)
+        pos = np.asarray(pos, dtype=np.float64)
         upright = float(_quat_to_mat(quat)[2, 2])
         if name == "plate":
             position = pos + self.PLATE_LATERAL * PLATE_RIM_R + np.array([0.0, 0.0, 0.009])

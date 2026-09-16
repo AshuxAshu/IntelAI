@@ -63,7 +63,20 @@ class TeacherContext:
         # The saturated ctrl advances per PHYSICS STEP (the reference engine's
         # bandwidth); a 25 Hz update is ~8x too slow at our 500 Hz timestep.
         self._grip_close: dict[str, tuple[float, float] | None] = {"A": None, "B": None}
+        # A carried object's squeeze has to outlive the skill that grasped it.
+        # In a multi-step graph the next step drives the OTHER arm, so the
+        # holding arm runs with no active close; a plain position servo at the
+        # resting aperture exerts no steady-state clamp and the cargo slides
+        # out while its arm just sits there (measured: arm A drops the bottle
+        # during arm B's mug pick). Set by `begin_carry`, cleared by
+        # `end_carry`, and overridden by any explicit close in progress.
+        self._carry_grip: dict[str, tuple[float, float] | None] = {"A": None, "B": None}
         self._bad_grip_since: dict[str, float | None] = {"A": None, "B": None}
+        # Arms deliberately pressing their cargo onto a surface. A seated
+        # object's weight passes to the table, so its jaw forces fall below
+        # the fumble threshold while the grasp is still perfectly good; the
+        # placing skill declares the window rather than the audit guessing.
+        self._seating: dict[str, bool] = {"A": False, "B": False}
         self._deadline = np.inf
         self._cache_ids()
 
@@ -226,11 +239,27 @@ class TeacherContext:
     def begin(self, skill_timeout: float = SKILL_TIMEOUT_S) -> None:
         """Start a skill: snapshot the hold pose and arm the deadline."""
         self._deadline = float(self.data.time) + skill_timeout
-        for arm in ARM_NAMES:
-            q = [float(self.data.qpos[self._jadr[arm][s]]) for s in ARM_JOINT_SUFFIXES]
-            grip = float(self.data.qpos[self._jadr[arm]["gripper"]])
-            self._hold[arm] = np.append(q, self.scene._ctrl_to_aperture(arm, grip))
-            self._grip_now[arm] = float(self._hold[arm][5])
+        self.latch_hold()
+
+    def extend_deadline(self, seconds: float) -> None:
+        """Give the running skill a fresh time budget without re-latching."""
+        self._deadline = float(self.data.time) + float(seconds)
+
+    def latch_hold(self, arm: str | None = None) -> None:
+        """Re-snapshot the idle-arm hold target from the LIVE pose.
+
+        ``action`` commands the non-acting arm to ``_hold``, so a stale latch
+        is a command to fly back to wherever that arm was when the latch was
+        taken. Whenever the acting arm changes — between graph steps, and
+        inside the relay when the receiver takes over — the holding arm must be
+        re-latched or it snaps back and throws its cargo (measured: arm A loses
+        the relayed bottle within 0.4 s of arm B starting the next pick).
+        """
+        for name in (ARM_NAMES if arm is None else (arm,)):
+            q = [float(self.data.qpos[self._jadr[name][s]]) for s in ARM_JOINT_SUFFIXES]
+            grip = float(self.data.qpos[self._jadr[name]["gripper"]])
+            self._hold[name] = np.append(q, self.scene._ctrl_to_aperture(name, grip))
+            self._grip_now[name] = float(self._hold[name][5])
 
     def action(self, arm: str, q_arm: np.ndarray, aperture: float) -> np.ndarray:
         """Build a 12-dim merged target: acting arm moves, other arm holds."""
@@ -254,7 +283,7 @@ class TeacherContext:
             if self.drawer_neutral:
                 self.hold_drawer_neutral()
             for arm in ARM_NAMES:
-                close = self._grip_close[arm]
+                close = self._grip_close[arm] or self._carry_grip[arm]
                 if close is None:
                     continue
                 torque_limit, ctrl_des = close
@@ -270,7 +299,7 @@ class TeacherContext:
                 ) / kp
             mujoco.mj_step(self.model, self.data)
         for arm in ARM_NAMES:
-            if self._grip_close[arm] is not None:
+            if self._grip_close[arm] is not None or self._carry_grip[arm] is not None:
                 qadr = self._jadr[arm]["gripper"]
                 self._grip_now[arm] = float(
                     self.scene._ctrl_to_aperture(arm, float(self.data.qpos[qadr]))
@@ -305,7 +334,9 @@ class TeacherContext:
                 if other_body in self.allowed[arm]:
                     continue
                 raise SkillFailed("skill", "collision", f"arm {arm} contacted {other_body}")
-            if carried is not None:
+            if carried is not None and self._seating[arm]:
+                self._bad_grip_since[arm] = None
+            elif carried is not None:
                 fixed, moving = self.finger_forces(arm, carried)
                 if min(fixed, moving) <= JAW_FORCE_MIN:
                     # Transient unloadings during motion are tolerated before
@@ -485,6 +516,37 @@ class TeacherContext:
             yield
         finally:
             self._grip_close[arm] = None
+
+    def begin_carry(self, arm: str, object_name: str, torque_limit: float,
+                    aperture: float = 0.0) -> None:
+        """Take ownership of a grasped object and clamp it until it is released."""
+        self.carrying[arm] = object_name
+        self._carry_grip[arm] = (
+            float(torque_limit), float(self.scene._aperture_to_ctrl(arm, aperture)),
+        )
+        self._bad_grip_since[arm] = None
+
+    def end_carry(self, arm: str) -> None:
+        """Give the object up: the standing clamp and the carry audit both stop."""
+        self.carrying[arm] = None
+        self._carry_grip[arm] = None
+        self._bad_grip_since[arm] = None
+
+    @contextmanager
+    def seating(self, arm: str):
+        """Suspend the carry fumble check while cargo is pressed onto a surface.
+
+        The audit reads unloaded jaws as a lost grasp, which is exactly what a
+        correct touchdown looks like: the object's weight is on the table and
+        the jaws go slack while the grip is still closed around it.
+        """
+        previous = self._seating[arm]
+        self._seating[arm] = True
+        try:
+            yield
+        finally:
+            self._seating[arm] = previous
+            self._bad_grip_since[arm] = None
 
     def hold(self, arm: str, q_target: np.ndarray, seconds: float):
         """Hold a commanded joint target while the position servo converges.
