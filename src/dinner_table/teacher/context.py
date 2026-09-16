@@ -519,12 +519,16 @@ class TeacherContext:
         self.drawer_neutral = False
         self.data.ctrl[self._drawer_act] = float(self.data.qpos[self._drawer_qadr])
 
-    def servo_close_drawer(self, arm: str = "A", seconds: float = 3.0,
-                           target_opening: float = 0.0):
-        """Slide the drawer toward ``target_opening`` via its position servo
-        while an arm holds a retrieved utensil (the physical CloseDrawer
-        needs the gripper), or to bring a fully-open drawer's handle back
-        into the arm's grasp band.
+    def servo_drawer(self, arm: str = "A", seconds: float = 3.0,
+                     target_opening: float = 0.0):
+        """Slide the drawer to ``target_opening`` (m) via its position servo.
+
+        Used when the gripper is not available for a physical handle pull:
+        closing while an arm holds a retrieved utensil, bringing a fully-open
+        handle back into the arm's grasp band, or staging an open drawer for
+        a skill that is not itself the drawer skill. The ramp is quintic —
+        a step command jerks the drawer hard enough to slide its cutlery off
+        the rails (measured: up to 3 cm of drift, and an ejected spoon).
 
         The held arm keeps its current target; the saturation in effect
         around this call keeps the grasp alive.

@@ -3,7 +3,7 @@
 The frames, grip torques, hovers, and carry limits are ported from the
 reference solution's proven grasp strategies (see docs/PLAN_AMENDMENTS.md):
 top-down grasps constrain the approach axis plus a lateral gripper-X
-direction; the bottle is a side grasp with the gripper's fingers horizontal.
+direction, and the bottle is pinched at its neck rather than its body.
 """
 
 from __future__ import annotations
@@ -15,7 +15,12 @@ import numpy as np
 
 from dinner_table.config import DinnerTableError
 from dinner_table.contracts.geometry import ARM_MOUNTS
-from dinner_table.scene.objects import BOTTLE_WALL_R, MUG_WALL_R, PLATE_RIM_R
+from dinner_table.scene.objects import (
+    BOTTLE_NECK_GRASP_Z,
+    BOTTLE_NECK_R,
+    MUG_WALL_R,
+    PLATE_RIM_R,
+)
 
 DOWN = np.array([0.0, 0.0, -1.0], dtype=np.float64)
 
@@ -105,13 +110,18 @@ class GraspCatalog:
         if name == "bottle":
             if upright < 0.5:
                 raise GraspCatalogError("bottle is lying sideways; sideways regrasp unsupported")
-            # Wall pinch at the diagonal on the body wall (the mug's
-            # mechanism at the bottle's radius). The bottle pick is not yet
-            # reliable — the neck side-grasp needs a solver mode that pins
-            # only the gripper-Y axis; tracked in PLAN_AMENDMENTS.
-            position = (pos + self.MUG_LATERAL * (BOTTLE_WALL_R - 0.002)
-                        + np.array([0.0, 0.0, 0.022]))
-            return GraspFrame(position, DOWN, self.MUG_LATERAL, 0.30, -2.4, 0.7, 0.055, 0.035, 15.0)
+            # Neck pinch from above, at the neck wall's inner face: the mug's
+            # proven sweep-and-seat mechanism applied to the narrow neck. The
+            # body wall cannot be grasped top-down — the jaws descending at
+            # the body radius jam on the shoulder ring and stall the arm
+            # 3-4 cm short of the grasp point (measured, 0/20). Nothing sits
+            # above the neck, so its descent corridor is clear, and the
+            # centre of mass hangs below the pinch. The hover is 0.040, not
+            # the usual 0.055: a neck grasp already sits at table+0.07, and
+            # the SO-101 holds no top-down approach above about table+0.11.
+            position = (pos + self.MUG_LATERAL * BOTTLE_NECK_R
+                        + np.array([0.0, 0.0, BOTTLE_NECK_GRASP_Z]))
+            return GraspFrame(position, DOWN, self.MUG_LATERAL, 0.30, -2.4, 0.7, 0.040, 0.030, 15.0)
         # Cutlery rolls when squeezed, so the upright check must not apply
         # (a rolled utensil is still grasped). Descent aperture: wide enough
         # that the arm's servo tracking error (~5-10 mm) cannot land a jaw

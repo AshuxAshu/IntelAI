@@ -24,6 +24,13 @@ UTENSIL_YAW_JITTER_RAD = 0.07
 # verified-feasible region around its anchor is razor-thin, so its spawn
 # jitter is minimal (mass/friction DR still fully randomize).
 BOTTLE_XY_JITTER_M = 0.015
+# Inner faces of the drawer's side walls (scenes/parts/drawer_cabinet.xml:
+# walls at local x = +/-0.150, 3 mm thick, on the caddy at CABINET_X). A
+# utensil's jittered-and-yawed footprint is clamped to stay inside them with
+# a margin: the east column's spread otherwise crosses the wall by a
+# fraction of a millimetre and the contact ejects it out of the drawer.
+DRAWER_INNER_X = (CABINET_X - 0.147, CABINET_X + 0.147)
+DRAWER_WALL_MARGIN_M = 0.003
 
 
 class SceneObjectError(DinnerTableError):
@@ -93,8 +100,11 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
         grasp_class="neck",
     ),
     # Utensils are real-cutlery-length capsules lying along Y (handle toward the
-    # arms) in four columns on the drawer floor, all within arm A's reach once
-    # the drawer has slid open.
+    # arms) in four columns on the cutlery rails, all within arm A's reach once
+    # the drawer has slid open. The east-most column stops at x = -0.15: the
+    # gripper's body reaches about 31 mm east of its grasp point, so a column
+    # any further east drives the jaw assembly into the drawer's east wall
+    # and the close stalls on it (measured: 17 mm of penetration, 8/20 picks).
     "spoon_1": ObjectSpec(
         physics=("box", (0.009, 0.055, 0.006)),
         spawn_anchor=(-0.15, CABINET_Y - 0.015, DRAWER_TRAY_Z),
@@ -106,7 +116,7 @@ OBJECT_CATALOG: dict[str, ObjectSpec] = {
     ),
     "spoon_2": ObjectSpec(
         physics=("box", (0.009, 0.055, 0.006)),
-        spawn_anchor=(-0.115, CABINET_Y - 0.015, DRAWER_TRAY_Z),
+        spawn_anchor=(-0.255, CABINET_Y - 0.015, DRAWER_TRAY_Z),
         spawn_yaw_rad=0.0,
         mass_kg=0.014,
         friction=(0.5, 0.005, 0.0001),
@@ -167,6 +177,15 @@ def _inside_furniture(xy: np.ndarray) -> bool:
     return False
 
 
+def _clamp_into_drawer(x: float, yaw: float, spec: ObjectSpec) -> float:
+    """Clamp a utensil's x (m) so its yawed footprint clears the drawer walls."""
+    half_x, half_y = spec.physics[1][0], spec.physics[1][1]
+    reach = abs(np.cos(yaw)) * half_x + abs(np.sin(yaw)) * half_y
+    low = DRAWER_INNER_X[0] + reach + DRAWER_WALL_MARGIN_M
+    high = DRAWER_INNER_X[1] - reach - DRAWER_WALL_MARGIN_M
+    return float(np.clip(x, low, high))
+
+
 def sample_spawns(
     rng: np.random.Generator, dr: DrProfile
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
@@ -210,6 +229,8 @@ def sample_spawns(
                     dtype=np.float64,
                 )
                 yaw = spec.spawn_yaw_rad + yaw_jitter
+                if name.startswith(("spoon", "fork")):
+                    pos[0] = _clamp_into_drawer(pos[0], yaw, spec)
 
             half_yaw = yaw * 0.5
             quat = np.array([np.cos(half_yaw), 0.0, 0.0, np.sin(half_yaw)], dtype=np.float64)
@@ -247,6 +268,9 @@ PLATE_RIM_R = 0.061
 MUG_WALL_R = 0.025
 BOTTLE_WALL_R = 0.028  # body wall centerline radius
 BOTTLE_NECK_Z = 0.073  # neck mid-height above the base (10 cm bottle)
+BOTTLE_COM_Z = 0.034  # water sits in the bottom third
+BOTTLE_NECK_R = 0.0115  # neck wall inner face radius
+BOTTLE_NECK_GRASP_Z = 0.068  # neck pinch height above the base
 SOFT_SOLREF = np.array([0.012, 1.0], dtype=np.float64)
 
 
@@ -361,12 +385,22 @@ def _build_vessel(body, name: str, mass_kg: float, friction) -> None:
         )).tolist()
     elif name == "bottle":
         # 10 cm hollow bottle: base, body wall, shoulder step, narrow neck.
-        # The four working grasp recipes (plate/mug/utensils) are unaffected
-        # by the bottle; this structure only needs to settle stably.
-        _cyl(body, name, BOTTLE_WALL_R, 0.007, 0.007, per, friction)
-        _ring(body, name, BOTTLE_WALL_R, 0.004, 0.041, 0.0275, per, friction)
-        _ring(body, name, 0.024, 0.008, 0.010, 0.053, per, friction)
-        _ring(body, name, 0.013, 0.003, 0.030, 0.073, per, friction)
+        # Massless geoms plus one explicit inertial, as for the mug: with
+        # per-geom masses the neck and shoulder rings carry two thirds of the
+        # weight and the centre of mass sits 28 mm ABOVE any body-wall grasp
+        # point, so the bottle hangs as a top-heavy pendulum and levers itself
+        # out of the jaws (measured: 0/20 picks). A real bottle's water sits
+        # in its bottom third; the inertial is placed there.
+        _cyl(body, name, BOTTLE_WALL_R, 0.007, 0.007, 0.0, friction)
+        _ring(body, name, BOTTLE_WALL_R, 0.004, 0.041, 0.0275, 0.0, friction)
+        _ring(body, name, 0.024, 0.008, 0.010, 0.053, 0.0, friction)
+        _ring(body, name, 0.013, 0.003, 0.030, 0.073, 0.0, friction)
+        body.explicitinertial = True
+        body.mass = mass_kg
+        body.ipos = [0.0, 0.0, BOTTLE_COM_Z]
+        body.inertia = (mass_kg / 12.0 * np.array(
+            [0.056**2 + 0.100**2, 0.056**2 + 0.100**2, 0.056**2 + 0.056**2]
+        )).tolist()
 
 
 def _build_utensil(body, name: str, mass_kg: float, friction) -> None:

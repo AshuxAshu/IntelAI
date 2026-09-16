@@ -19,9 +19,10 @@ import numpy as np
 from dinner_table.contracts.geometry import (
     DRAWER_TRAVEL,
     HOME_JOINTS,
-    PLACEMATS,
     TABLE_TOP_HEIGHT,
 )
+from dinner_table.policies.conditioning import goal_for_skill
+from dinner_table.reasoning.schema import RelativeTarget
 from dinner_table.teacher.context import SkillFailed, TeacherContext
 from dinner_table.teacher.grasp_catalog import GraspCatalog, GraspFrame
 from dinner_table.teacher.ik import IKUnreachable
@@ -380,23 +381,26 @@ class Place(Skill):
         self.target = target
 
     def _target_xyz(self, ctx: TeacherContext) -> np.ndarray:
-        if isinstance(self.target, str):
-            if self.target not in PLACEMATS:
-                raise SkillFailed("place", "carry", f"unknown target {self.target}")
-            px, py, _ = PLACEMATS[self.target]
-            return np.array([px, py, PLACE_Z["table"]])
-        # Anchor-relative target: the offset rides the anchor's yaw so the
-        # placement stays correct however the anchor sits (§10.5 semantics;
-        # the teacher mirrors the runtime's perceived-anchor resolution).
-        rel = self.target
-        anchor_pos, anchor_rot_quat = ctx.object(rel["anchor"])
-        mat = np.zeros(9, dtype=np.float64)
-        mujoco.mju_quat2Mat(mat, np.asarray(anchor_rot_quat, dtype=np.float64))
-        anchor_yaw = np.arctan2(mat.reshape(3, 3)[1, 0], mat.reshape(3, 3)[0, 0])
-        offset = 0.14 * np.array([np.cos(anchor_yaw + np.pi), np.sin(anchor_yaw + np.pi), 0.0])
-        return np.array([
-            anchor_pos[0] + offset[0], anchor_pos[1] + offset[1], PLACE_Z["table"],
-        ])
+        """Resolve the placement anchor through the deployed goal rule.
+
+        Named settings and anchor-relative targets go through
+        ``conditioning.goal_for_skill`` so the teacher and the runtime resolve
+        them identically; a dict carrying ``point`` is an explicit world
+        position (the handoff's relay anchor).
+        """
+        target = self.target
+        if isinstance(target, dict):
+            if "point" in target:
+                return np.asarray(target["point"], dtype=np.float64)
+            target = RelativeTarget(relation=target["relation"], anchor=target["anchor"])
+        anchor_position = None
+        if isinstance(target, RelativeTarget):
+            anchor_position = ctx.object(target.anchor)[0]
+        try:
+            goal = goal_for_skill("place", self.object_name, None, target, anchor_position)
+        except (ValueError, KeyError) as exc:
+            raise SkillFailed("place", "carry", f"unknown target {self.target}") from exc
+        return np.array([goal[0], goal[1], PLACE_Z["table"]])
 
     def _flatten_shift(self, obj_quat: np.ndarray) -> np.ndarray:
         """Predicted horizontal shift when a leaning vessel rocks flat.
@@ -474,7 +478,7 @@ class Place(Skill):
                 # before transiting (arm A is holding the utensil, so the
                 # physical CloseDrawer grasp is not an option). The carried
                 # utensil rides above the wall tops at the carry line.
-                yield from ctx.servo_close_drawer(self.arm)
+                yield from ctx.servo_drawer(self.arm)
             # Align the GRASP POINT over the target (target + grasp offset):
             # the site must not go to the placemat center itself — a rim pinch
             # then hangs a plate one rim-radius off and the diagonal descent
@@ -733,7 +737,7 @@ class CloseDrawer(OpenDrawer):
         # band, then finish the last stretch with the physical handle push.
         GRASP_BAND_OPENING = 0.06
         if opening > GRASP_BAND_OPENING:
-            yield from ctx.servo_close_drawer(self.arm, target_opening=GRASP_BAND_OPENING)
+            yield from ctx.servo_drawer(self.arm, target_opening=GRASP_BAND_OPENING)
             opening = ctx.drawer_opening()
         ctx.allowed[self.arm] = {"drawer_top", "cabinet"}
         try:

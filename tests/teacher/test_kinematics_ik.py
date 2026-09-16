@@ -240,11 +240,15 @@ def test_planner_keepout() -> None:
         plan_corridor(scene, "A", np.array(HOME_JOINTS["A"][:5], dtype=np.float64), q_goal_bad)
 
     # A healthy A-zone corridor: every returned waypoint stays outside all keep-outs.
+    # The goal sits at grasp height: the corridor's second hover rides 0.06 m
+    # above it, and the SO-101 holds a top-down approach only to about
+    # table+0.10, so a working-height goal would put the retreat out of the
+    # measured envelope and force the detour.
     q_goal = solve_ik(
         model,
         data,
         "A.ee",
-        np.array([-0.08, -0.20, TABLE_TOP_HEIGHT + 0.05]),
+        np.array([-0.08, -0.20, TABLE_TOP_HEIGHT + 0.01]),
         DOWN,
         np.array(HOME_JOINTS["A"][:5], dtype=np.float64),
     )

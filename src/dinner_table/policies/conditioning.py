@@ -112,7 +112,7 @@ def goal_for_skill(
                 )
             offset = {"left_of": (-0.14, 0.0, 0.0), "right_of": (0.14, 0.0, 0.0)}[target.relation]
             return np.asarray(anchor_position, dtype=np.float64) + np.asarray(offset)
-        if target.startswith("placemat_"):
+        if target in PLACEMATS:
             return np.asarray(PLACEMATS[target], dtype=np.float64)
         if target == "drawer_tray":
             return np.asarray((0.0, 0.50, 0.42), dtype=np.float64)

@@ -6,6 +6,7 @@ import mujoco
 import numpy as np
 
 from dinner_table.scene.objects import (
+    DRAWER_INNER_X,
     OBJECT_CATALOG,
     UTENSIL_XY_JITTER_M,
     DrProfile,
@@ -63,15 +64,25 @@ def test_sample_spawns_deterministic_bitwise() -> None:
 
 
 def test_utensil_spawns_inside_drawer_footprint() -> None:
-    """Validate all utensil spawns remain inside the drawer envelope across 100 seeds."""
+    """Validate every utensil's yawed footprint clears the drawer walls across 100 seeds."""
     dr = DrProfile(spawn_xy_jitter_m=0.06, spawn_yaw_jitter_rad=0.44)
     utensils = ("spoon_1", "spoon_2", "fork_1", "fork_2")
     for seed in range(100):
         rng = np.random.default_rng(seed)
         spawns = sample_spawns(rng, dr)
         for name in utensils:
-            pos, _ = spawns[name]
-            assert -0.30 <= pos[0] <= -0.14, f"utensil {name} x={pos[0]} outside [-0.30, -0.14]"
+            pos, quat = spawns[name]
+            half_x, half_y = OBJECT_CATALOG[name].physics[1][:2]
+            mat = np.zeros(9, dtype=np.float64)
+            mujoco.mju_quat2Mat(mat, np.asarray(quat, dtype=np.float64))
+            rot = mat.reshape(3, 3)
+            reach = abs(rot[0, 0]) * half_x + abs(rot[0, 1]) * half_y
+            assert DRAWER_INNER_X[0] <= pos[0] - reach, (
+                f"utensil {name} crosses the west drawer wall at x={pos[0] - reach}"
+            )
+            assert pos[0] + reach <= DRAWER_INNER_X[1], (
+                f"utensil {name} crosses the east drawer wall at x={pos[0] + reach}"
+            )
             assert 0.09 <= pos[1] <= 0.13, f"utensil {name} y={pos[1]} outside [0.09, 0.13]"
 
 

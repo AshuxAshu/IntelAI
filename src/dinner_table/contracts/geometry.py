@@ -56,7 +56,11 @@ VLM_IMAGE_SIZE = (512, 512)
 # front-edge mount; the zones overlap in a center strip (classified "shared"),
 # and the shared zone proper is the front-center lens both arms reach at
 # working height (measured: 25/25 dual-reach at table+0.05, union at table+0.10).
-SHARED_ZONE = (-0.06, 0.06, -0.30, -0.16)
+# Amendment 2: the ee site moved 8 mm further along the fingers (the reference's
+# tool point), which retracted the reachable envelope by the same 8 mm and cost
+# the lens its two far corners at y = -0.16; re-measured, the dual-reach lens
+# now ends at y = -0.18.
+SHARED_ZONE = (-0.06, 0.06, -0.30, -0.18)
 ARM_A_ZONE = (-0.48, 0.02, -0.39, 0.05)
 ARM_B_ZONE = (-0.02, 0.48, -0.39, 0.05)
 

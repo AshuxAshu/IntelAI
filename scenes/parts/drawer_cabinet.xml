@@ -21,8 +21,8 @@
            the north bar at local +0.006 with the cutlery centered at local
            y -0.015, leaving the jaws' north edge (~+1.5 cm from the grasp
            site) 3 mm of clearance. -->
-      <geom name="cutlery_support_south" type="box" size="0.078 0.003 0.005" pos="0 -0.047 0.024" class="furniture"/>
-      <geom name="cutlery_support_north" type="box" size="0.078 0.003 0.005" pos="0 0.006 0.024" class="furniture"/>
+      <geom name="cutlery_support_south" type="box" size="0.140 0.003 0.005" pos="0 -0.047 0.024" class="furniture"/>
+      <geom name="cutlery_support_north" type="box" size="0.140 0.003 0.005" pos="0 0.006 0.024" class="furniture"/>
       <geom name="drawer_side_l" type="box" size="0.003 0.072 0.015" pos="-0.150 0 0.034" class="furniture"/>
       <geom name="drawer_side_r" type="box" size="0.003 0.072 0.015" pos="0.150 0 0.034" class="furniture"/>
       <geom name="drawer_back" type="box" size="0.150 0.003 0.015" pos="0 0.069 0.034" class="furniture"/>
