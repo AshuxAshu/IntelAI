@@ -12,6 +12,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
+# The Intel stack has no macOS wheels (see pyproject's sys_platform markers), so
+# the module-level imports below abort COLLECTION of the whole suite on a dev Mac
+# rather than being skipped by the pytestmark further down. Skip at import time
+# instead; on the Intel target host the stack is present and nothing is skipped.
+pytest.importorskip("openvino", reason="Intel stack (openvino) not installed on this host")
+
 from openvino import Core as OvCore
 from ultralytics import YOLO
 from ultralytics.utils import ASSETS

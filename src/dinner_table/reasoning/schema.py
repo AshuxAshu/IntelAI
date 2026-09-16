@@ -30,6 +30,8 @@ ObjectName = Literal[
 PlacementTarget = Literal[
     "placemat_1",
     "placemat_2",
+    "fork_setting",
+    "spoon_setting",
     "drawer_tray",
     "hand_of_A",
     "hand_of_B",

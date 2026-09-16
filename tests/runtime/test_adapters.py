@@ -7,6 +7,12 @@ import importlib.util
 import numpy as np
 import pytest
 
+# The Intel stack has no macOS wheels (see pyproject's sys_platform markers), so
+# the module-level imports below abort COLLECTION of the whole suite on a dev Mac
+# rather than being skipped by the pytestmark further down. Skip at import time
+# instead; on the Intel target host the stack is present and nothing is skipped.
+pytest.importorskip("physicalai", reason="Intel stack (physicalai) not installed on this host")
+
 from dinner_table.contracts.geometry import HOME_JOINTS, JOINT_NAMES, POLICY_CAMERA_NAMES
 from dinner_table.runtime.mujoco_camera import MuJoCoCamera
 from dinner_table.runtime.mujoco_robot import MuJoCoBimanualRobot

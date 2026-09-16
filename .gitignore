@@ -24,3 +24,6 @@ Problem Statement.md
 IMPLEMENTATION_PLAN.md
 docs/IMPLEMENTATION_PLAN.md
 learning.md
+
+# MuJoCo writes this next to the CWD whenever a renderer warns; it is a log, not source.
+MUJOCO_LOG.TXT
