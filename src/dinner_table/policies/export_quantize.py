@@ -16,10 +16,13 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import gc
 import hashlib
+import io
 import json
 import logging
 import os
+import time
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -86,11 +89,11 @@ def compress_int8_weights(export_dir: Path) -> Path:
     """
     ir_path = _ir_path(export_dir)
     mode = CompressWeightsMode.INT8_SYM
-    compressed = compress_weights(_read_ir(ir_path), mode=mode)
+    compressed = compress_weights(read_ir(ir_path), mode=mode)
     if not _compiles_on_cpu(compressed):
         logger.warning("INT8_SYM graph rejected by the CPU plugin; retrying with INT8_ASYM")
         mode = CompressWeightsMode.INT8_ASYM
-        compressed = compress_weights(_read_ir(ir_path), mode=mode)
+        compressed = compress_weights(read_ir(ir_path), mode=mode)
     if not _compiles_on_cpu(compressed):
         raise ExportError("INT8 weight compression produced a model the CPU plugin cannot compile")
     _save_ir(compressed, ir_path)
@@ -104,7 +107,7 @@ def ptq_int8(export_dir: Path, calibration_samples: Iterable[Mapping[str, np.nda
         raise ExportError("post-training quantization requires at least one calibration sample")
     ir_path = _ir_path(export_dir)
     quantized = quantize(
-        _read_ir(ir_path),
+        read_ir(ir_path),
         NncfDataset(samples),
         subset_size=min(CALIBRATION_SUBSET_SIZE, len(samples)),
     )
@@ -120,7 +123,7 @@ def random_inputs(export_dir: Path, n: int, seed: int = 0) -> list[dict[str, np.
     for PTQ calibration and parity fixtures when the project dataset is
     unavailable.
     """
-    model = _read_ir(_ir_path(export_dir))
+    model = read_ir(_ir_path(export_dir))
     rng = np.random.default_rng(seed)
     samples: list[dict[str, np.ndarray]] = []
     for _ in range(n):
@@ -148,8 +151,33 @@ def _ir_path(export_dir: Path) -> Path:
     return path
 
 
-def _read_ir(ir_path: Path) -> ov.Model:
-    return ov.Core().read_model(str(ir_path))
+def read_ir(ir_path: Path) -> ov.Model:
+    """Read an IR with its weights held in memory rather than memory-mapped.
+
+    # NOTE: ov.Core().read_model(path) memory-maps the weights .bin. That is
+    # harmless on Linux, where a mapped file can still be replaced, but on
+    # Windows a mapped file is locked: the quantization rungs read the IR and
+    # then save the compressed model back over the same path, and the
+    # os.replace under that mapping fails with WinError 32 ("used by another
+    # process"). Routing both halves through BytesIO keeps the weights on the
+    # heap and leaves no handle open on the files being replaced.
+    """
+    if not ir_path.is_file():
+        raise ExportError(f"IR not found: {ir_path}")
+    xml_bytes = ir_path.read_bytes()
+    weights_path = ir_path.with_suffix(".bin")
+    if not weights_path.is_file():
+        # A weights-free IR carries everything in the XML; one that references
+        # weights without a .bin is corrupt, and OpenVINO's own complaint
+        # ("Incorrect weights in bin file!") does not say which file is missing.
+        try:
+            return ov.Core().read_model(io.BytesIO(xml_bytes))
+        except RuntimeError as exc:
+            raise ExportError(
+                f"{ir_path} has no sibling {weights_path.name} and the XML alone does not "
+                f"deserialize: {exc}"
+            ) from exc
+    return ov.Core().read_model(io.BytesIO(xml_bytes), io.BytesIO(weights_path.read_bytes()))
 
 
 def _compiles_on_cpu(model: ov.Model) -> bool:
@@ -160,15 +188,34 @@ def _compiles_on_cpu(model: ov.Model) -> bool:
     return True
 
 
+def _replace_with_retry(source: Path, destination: Path, attempts: int = 5) -> None:
+    """os.replace with a short backoff for Windows' transient file locks.
+
+    Windows indexers and antivirus probes can hold a freshly written file for a
+    moment after it closes; the move is legal a retry later. A failure on the
+    final attempt propagates unchanged, so a genuine error is never masked.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            gc.collect()
+            time.sleep(0.25 * (attempt + 1))
+
+
 def _save_ir(model: ov.Model, ir_path: Path) -> None:
     """Save through a sibling temp file plus atomic replace.
 
-    read_model may memory-map the .bin; overwriting the mapped file in place
-    crashes the process, and a crash mid-write would leave a truncated IR."""
+    Overwriting the mapped files in place crashes the process, and a crash
+    mid-write would leave a truncated IR, so both halves are written aside and
+    then moved into place."""
     tmp = ir_path.with_name(ir_path.stem + "_saving.xml")
     ov.save_model(model, str(tmp))
-    os.replace(tmp, ir_path)
-    os.replace(tmp.with_suffix(".bin"), ir_path.with_suffix(".bin"))
+    _replace_with_retry(tmp, ir_path)
+    _replace_with_retry(tmp.with_suffix(".bin"), ir_path.with_suffix(".bin"))
 
 
 def _sha256_file(path: Path) -> str:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -174,6 +175,63 @@ class TestCli:
     def test_rejects_nonpositive_iters(self, tmp_path):
         with pytest.raises(SystemExit):
             main(["--iters", "0", "--out", str(tmp_path), "--no-auto-train"])
+
+
+class TestIrReading:
+    """read_ir must not leave the weights file mapped (a Windows file lock)."""
+
+    @pytest.mark.fast
+    @requires_openvino
+    def test_read_ir_does_not_hold_the_bin_open(self, tmp_path):
+        """After read_ir, the .bin must be replaceable - the Windows failure mode.
+
+        The quantization rungs read the IR and then save over the same path, so
+        a lingering mapping turns into WinError 32 on Windows.
+        """
+        from dinner_table.policies.export_quantize import read_ir
+
+        source = _small_ir_path_or_skip()
+        xml_copy = tmp_path / source.name
+        bin_copy = tmp_path / source.with_suffix(".bin").name
+        xml_copy.write_bytes(source.read_bytes())
+        bin_copy.write_bytes(source.with_suffix(".bin").read_bytes())
+
+        model = read_ir(xml_copy)
+        assert len(model.get_ops()) > 0
+
+        replacement = tmp_path / "replacement.bin"
+        replacement.write_bytes(bin_copy.read_bytes())
+        os.replace(replacement, bin_copy)  # raises PermissionError on Windows if mapped
+        assert bin_copy.is_file()
+
+    @pytest.mark.fast
+    @requires_openvino
+    def test_missing_bin_is_an_explicit_error(self, tmp_path):
+        """A weights-carrying IR with no .bin must name the missing file."""
+        from dinner_table.policies.export_quantize import ExportError, read_ir
+
+        source = _small_ir_path_or_skip()
+        xml_only = tmp_path / source.name
+        xml_only.write_bytes(source.read_bytes())  # deliberately no .bin beside it
+
+        with pytest.raises(ExportError, match="does not deserialize"):
+            read_ir(xml_only)
+
+    @pytest.mark.fast
+    @requires_openvino
+    def test_missing_ir_is_an_explicit_error(self, tmp_path):
+        from dinner_table.policies.export_quantize import ExportError, read_ir
+
+        with pytest.raises(ExportError, match="IR not found"):
+            read_ir(tmp_path / "nope.xml")
+
+
+def _small_ir_path_or_skip() -> Path:
+    """The most recent export rung IR, or skip when nothing is exported yet."""
+    candidates = sorted(Path("artifacts/act_public").glob("*/*.xml"))
+    if not candidates:
+        pytest.skip("no exported IR; run scripts/benchmark_openvino.py first")
+    return candidates[0]
 
 
 class TestMeasurementPath:

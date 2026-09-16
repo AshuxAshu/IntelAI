@@ -51,6 +51,7 @@ from dinner_table.policies.export_quantize import (
     export_openvino,
     ptq_int8,
     random_inputs,
+    read_ir,
 )
 
 SCHEMA_VERSION = "ov-matrix/1.0"
@@ -358,7 +359,7 @@ def _bench_pytorch(ckpt: Path, reference_rung: Path, iters: int, warmup: int, se
 
 def _input_shapes(reference_rung: Path) -> dict[str, tuple[int, ...]]:
     """Manifest-shaped inputs of the exported model (static after tracing)."""
-    model = ov.Core().read_model(str(_ir_path(reference_rung)))
+    model = read_ir(_ir_path(reference_rung))
     return {
         inp.get_any_name(): tuple(dim.get_length() for dim in inp.partial_shape)
         for inp in model.inputs
@@ -611,7 +612,7 @@ def _row_dict(row: Row) -> dict:
 
 def _ir_precisions(export_dir: Path) -> tuple[str, str]:
     """Weights/activations precision read from the IR's own element types."""
-    model = ov.Core().read_model(str(_ir_path(export_dir)))
+    model = read_ir(_ir_path(export_dir))
     names = {
         ov.Type.f32: "FP32",
         ov.Type.f16: "FP16",

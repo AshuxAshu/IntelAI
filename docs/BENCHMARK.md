@@ -7,12 +7,35 @@ command does the whole chain and prints the result.
 
 ## What you need
 
-- Linux (the Intel stack has no macOS wheels; `uv sync` still installs cleanly
-  on a Mac, the benchmark itself will not run there).
-- Python 3.12, `uv` installed.
+- **Linux or Windows** on an Intel machine. (macOS is not supported for the
+  benchmark: the Intel stack has no macOS wheels at all, so `uv sync` there
+  cannot install `openvino`/`physicalai`.)
+- **`uv`**, which also installs the right Python for you. It is often not
+  preinstalled - if `uv` is "not recognized" / "command not found", install it:
+
+  ```powershell
+  # Windows (PowerShell)
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+
+  ```sh
+  # Linux / macOS
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+  Alternatives: `winget install --id=astral-sh.uv -e` on Windows, or
+  `pip install uv` anywhere. Restart your terminal afterwards so the new
+  `uv` is on `PATH`. Check with `uv --version`.
 - An Intel CPU with OpenVINO support. An iGPU and/or NPU are picked up
   automatically when present; on a laptop without an NPU the NPU column prints
   a dash, it does not fail the run.
+
+Windows notes: `make` is not available, so run the Python command directly (the
+`make bench-ov` equivalent). The benchmark needs no MuJoCo rendering, so no GPU
+setup beyond the Intel graphics driver is required. `uv sync` resolves
+correctly on Windows - `torch` is taken from PyPI there instead of the
+Linux-only CPU wheel index, and `torchcodec` is skipped because it has no
+Windows build.
 
 ## Run it
 
@@ -26,7 +49,25 @@ exports the four precision rungs (about half a minute), then times everything.
 Later runs reuse both. The table is printed and also written to
 `bench/ov_matrix/` as markdown, CSV, and JSON.
 
-Equivalent make target: `make bench-ov`.
+Equivalent make target (Linux only): `make bench-ov`.
+
+## If something fails
+
+**`uv: The term 'uv' is not recognized` (Windows) / `uv: command not found`.**
+`uv` is not installed or not on `PATH`. Install it and reopen the terminal -
+see "What you need" above.
+
+**`PermissionError: [WinError 32] ... used by another process` while exporting
+or quantizing.** Windows locks a file while OpenVINO has it memory-mapped, so a
+rung that reads an IR and then saves over it can hit this if something else
+(Antivirus, OneDrive/Dropbox sync, a Windows indexer) has the file open. The
+code already reads IRs through in-memory buffers to avoid the lock and retries
+the move briefly. If it still happens: close anything syncing the project
+folder, or run from a plain local directory such as `C:\work\IntelAI` rather
+than a cloud-synced one, then re-run with `--force`.
+
+**`Incorrect weights in bin file!`** An IR is missing its sibling `.bin`. Delete
+the offending rung directory under the exports root and re-run with `--force`.
 
 ## What the table means
 
