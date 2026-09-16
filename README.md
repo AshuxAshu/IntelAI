@@ -33,6 +33,19 @@ demonstrations, bounding boxes, and VQA pairs for free.
 
 ## Tech stack
 
+<table align="center">
+<tr>
+<td align="center"><a href="https://cdn-uploads.huggingface.co/production/uploads/677ac3710c9718b04aac4c1f/VWzTBcjyuXxMxypIc2gW1.png"><img src="assets/readme/tech_openvino.png" width="256" height="75" alt="Intel OpenVINO"></a><br><b>Intel OpenVINO</b></td>
+<td align="center"><a href="https://github.com/qwenlm/qwen3-vl"><img src="assets/readme/tech_qwen3vl.png" width="256" height="75" alt="Qwen3-VL"></a><br><b>Qwen3-VL</b></td>
+<td align="center"><a href="https://github.com/open-edge-platform/physical-ai-studio"><img src="assets/readme/tech_physical_ai_studio.png" width="256" height="75" alt="Intel Physical AI Studio"></a><br><b>Intel Physical AI Studio</b></td>
+</tr>
+<tr>
+<td align="center"><a href="https://mujoco.readthedocs.io/"><img src="assets/readme/tech_mujoco.png" width="256" height="75" alt="MuJoCo"></a><br><b>MuJoCo</b></td>
+<td align="center"><a href="https://huggingface.co/lerobot"><img src="assets/readme/tech_lerobot.png" width="256" height="75" alt="LeRobot"></a><br><b>LeRobot</b></td>
+<td align="center"><a href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5LOldpTwcr_iQbfkOZ0ysRpO6QVkAswOV-_Kd_TFVSg&amp;s=10"><img src="assets/readme/tech_yolo11_ultralytics.png" width="256" height="75" alt="YOLO11n Ultralytics"></a><br><b>YOLO11n · Ultralytics</b></td>
+</tr>
+</table>
+
 | Layer | Technology | Role in this project |
 | --- | --- | --- |
 | Simulation | **MuJoCo 3.2** (`MjSpec` programmatic scenes, EGL offscreen render) | Dual SO-101 physics, cameras, domain randomization |
@@ -46,19 +59,6 @@ demonstrations, bounding boxes, and VQA pairs for free.
 | Reasoner | **Qwen3-VL-2B-Instruct** + LoRA SFT | Instruction → JSON task graph, grounded scene QA, re-planning |
 | Optimization platform | **Intel Physical AI Studio** | Train → export → quantize → deploy in one toolchain |
 | Environment | `uv` + Python 3.12, Docker, GitHub Actions (CPU CI) | Pinned, reproducible, judge-ready |
-
-<table align="center">
-<tr>
-<td align="center"><a href="https://cdn-uploads.huggingface.co/production/uploads/677ac3710c9718b04aac4c1f/VWzTBcjyuXxMxypIc2gW1.png"><img src="assets/readme/tech_openvino.png" width="256" height="75" alt="Intel OpenVINO"></a><br><b>Intel OpenVINO</b></td>
-<td align="center"><a href="https://github.com/qwenlm/qwen3-vl"><img src="assets/readme/tech_qwen3vl.png" width="256" height="75" alt="Qwen3-VL"></a><br><b>Qwen3-VL</b></td>
-<td align="center"><a href="https://github.com/open-edge-platform/physical-ai-studio"><img src="assets/readme/tech_physical_ai_studio.png" width="256" height="75" alt="Intel Physical AI Studio"></a><br><b>Intel Physical AI Studio</b></td>
-</tr>
-<tr>
-<td align="center"><a href="https://mujoco.readthedocs.io/"><img src="assets/readme/tech_mujoco.png" width="256" height="75" alt="MuJoCo"></a><br><b>MuJoCo</b></td>
-<td align="center"><a href="https://huggingface.co/lerobot"><img src="assets/readme/tech_lerobot.png" width="256" height="75" alt="LeRobot"></a><br><b>LeRobot</b></td>
-<td align="center"><a href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ5LOldpTwcr_iQbfkOZ0ysRpO6QVkAswOV-_Kd_TFVSg&amp;s=10"><img src="assets/readme/tech_yolo11_ultralytics.png" width="256" height="75" alt="YOLO11n Ultralytics"></a><br><b>YOLO11n · Ultralytics</b></td>
-</tr>
-</table>
 
 ---
 
